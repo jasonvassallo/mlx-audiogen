@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useStore } from "./store/useStore";
+import { useServerHeartbeat } from "./hooks/useServerHeartbeat";
 import Header from "./components/Header";
 import ModelSelector from "./components/ModelSelector";
 import PromptInput from "./components/PromptInput";
@@ -15,6 +16,7 @@ export default function App() {
   const loadSettings = useStore((s) => s.loadSettings);
   const modelsLoading = useStore((s) => s.modelsLoading);
   const modelsError = useStore((s) => s.modelsError);
+  const connected = useServerHeartbeat();
 
   useEffect(() => {
     loadModels();
@@ -24,6 +26,14 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-surface-0">
+      {/* Server disconnected banner */}
+      {!connected && (
+        <div className="bg-error/90 text-surface-0 px-4 py-2 text-center text-sm font-medium">
+          Server disconnected — restart with{" "}
+          <code className="bg-surface-0/20 px-1 rounded">mlx-audiogen-app</code>
+        </div>
+      )}
+
       <Header />
 
       <main className="flex flex-1 overflow-hidden">

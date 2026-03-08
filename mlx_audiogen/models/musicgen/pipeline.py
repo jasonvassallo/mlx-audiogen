@@ -149,6 +149,7 @@ class MusicGenPipeline:
         melody_path: Optional[str] = None,
         style_audio_path: Optional[str] = None,
         style_coef: float = 5.0,
+        progress_callback: object = None,
     ) -> np.ndarray:
         """Generate audio from a text prompt with optional melody or style conditioning.
 
@@ -241,6 +242,7 @@ class MusicGenPipeline:
             melody_conditioning=melody_cond,
             style_conditioning=style_cond,
             style_coef=style_coef,
+            progress_callback=progress_callback,
         )
 
         # Step 5: Decode tokens to audio via EnCodec

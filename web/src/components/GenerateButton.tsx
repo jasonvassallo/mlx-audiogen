@@ -6,13 +6,9 @@ export default function GenerateButton() {
   const activeJob = useStore((s) => s.activeJob);
   const generateError = useStore((s) => s.generateError);
 
-  // Progress estimation: ~2x realtime (same as Max for Live client)
-  const progress = (() => {
-    if (!activeJob || !isGenerating) return 0;
-    const elapsed = (Date.now() / 1000 - activeJob.created_at) * 1000;
-    const estimated = activeJob.seconds * 1000 * 2;
-    return Math.min(95, (elapsed / estimated) * 100);
-  })();
+  // Use real server-reported progress (0.0 to 1.0)
+  const progress = activeJob?.progress ?? 0;
+  const progressPct = Math.round(progress * 100);
 
   return (
     <div className="space-y-2">
@@ -27,21 +23,22 @@ export default function GenerateButton() {
           disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100
         "
       >
-        {isGenerating ? "Generating..." : "Generate"}
+        {isGenerating ? `Generating ${progressPct}%` : "Generate"}
       </button>
 
       {/* Progress bar */}
       {isGenerating && (
         <div className="space-y-1">
-          <div className="h-1 w-full overflow-hidden rounded-full bg-surface-3">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
             <div
-              className="h-full rounded-full bg-accent transition-all duration-500"
-              style={{ width: `${progress}%` }}
+              className="h-full rounded-full bg-accent transition-all duration-300"
+              style={{ width: `${Math.max(2, progressPct)}%` }}
             />
           </div>
           <div className="text-center text-xs text-text-muted">
-            {activeJob?.status === "queued" && "Queued..."}
-            {activeJob?.status === "running" && "Generating audio..."}
+            {activeJob?.status === "queued" && "Queued — waiting for model to load..."}
+            {activeJob?.status === "running" &&
+              `Step ${Math.round(progress * 100)}%`}
           </div>
         </div>
       )}

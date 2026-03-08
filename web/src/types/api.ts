@@ -40,6 +40,7 @@ export interface JobInfo {
   completed_at: number | null;
   error: string | null;
   sample_rate: number | null;
+  progress: number; // 0.0 to 1.0
 }
 
 /** Matches server's ModelInfo. */

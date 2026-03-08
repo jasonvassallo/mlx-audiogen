@@ -105,6 +105,7 @@ class JobInfo(BaseModel):
     completed_at: Optional[float] = None
     error: Optional[str] = None
     sample_rate: Optional[int] = None
+    progress: float = 0.0  # 0.0 to 1.0
 
 
 class GenerateResponse(BaseModel):
@@ -181,6 +182,7 @@ class _Job:
         "sample_rate",
         "channels",
         "error",
+        "progress",
     )
 
     def __init__(self, job_id: str, request: GenerateRequest):
@@ -193,6 +195,7 @@ class _Job:
         self.sample_rate: int | None = None
         self.channels: int = 1
         self.error: str | None = None
+        self.progress: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +239,12 @@ _WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.get("/api/health")
+def health_check() -> dict[str, str]:
+    """Health check endpoint for browser heartbeat."""
+    return {"status": "ok"}
 
 
 @app.get("/api/models")
@@ -298,6 +307,7 @@ def get_status(job_id: str) -> JobInfo:
         completed_at=job.completed_at,
         error=job.error,
         sample_rate=job.sample_rate,
+        progress=job.progress,
     )
 
 
@@ -339,12 +349,17 @@ def _run_generation(job: _Job) -> None:
     """Execute generation in the thread pool worker."""
     try:
         job.status = JobStatus.RUNNING
+
+        def on_progress(frac: float) -> None:
+            """Callback: update job progress (0.0 to 1.0)."""
+            job.progress = max(0.0, min(1.0, frac))
+
         req = job.request
 
         if req.model == "stable_audio":
-            audio, sr, channels = _generate_stable_audio(req)
+            audio, sr, channels = _generate_stable_audio(req, on_progress)
         elif req.model == "musicgen":
-            audio, sr, channels = _generate_musicgen(req)
+            audio, sr, channels = _generate_musicgen(req, on_progress)
         else:
             raise ValueError(f"Unknown model: {req.model}")
 
@@ -435,6 +450,7 @@ def _trim_to_exact_duration(
 
 def _generate_musicgen(
     req: GenerateRequest,
+    on_progress: object = None,
 ) -> tuple[np.ndarray, int, int]:
     """Generate audio using MusicGen pipeline."""
     from mlx_audiogen.models.musicgen import MusicGenPipeline
@@ -454,6 +470,7 @@ def _generate_musicgen(
         melody_path=req.melody_path,
         style_audio_path=req.style_audio_path,
         style_coef=req.style_coef,
+        progress_callback=on_progress,
     )
     # MusicGen outputs mono by default; stereo variants output interleaved
     channels = 1
@@ -466,6 +483,7 @@ def _generate_musicgen(
 
 def _generate_stable_audio(
     req: GenerateRequest,
+    on_progress: object = None,
 ) -> tuple[np.ndarray, int, int]:
     """Generate audio using Stable Audio pipeline."""
     from mlx_audiogen.models.stable_audio import StableAudioPipeline
@@ -479,6 +497,7 @@ def _generate_stable_audio(
         cfg_scale=req.cfg_scale,
         seed=req.seed,
         sampler=req.sampler,
+        progress_callback=on_progress,
     )
 
     audio = _trim_to_exact_duration(audio, req.seconds, 44100, 2)  # type: ignore[arg-type, assignment]

@@ -121,6 +121,7 @@ class StableAudioPipeline:
         sigma_max: float = 1.0,
         seed: Optional[int] = None,
         sampler: str = "euler",
+        progress_callback: object = None,
     ) -> mx.array:
         """Generate audio from a text prompt.
 
@@ -186,6 +187,7 @@ class StableAudioPipeline:
             global_cond,
             cfg_scale,
             steps,
+            progress_callback=progress_callback,
         )
 
         # Decode latents to audio

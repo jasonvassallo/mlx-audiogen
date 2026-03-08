@@ -174,6 +174,7 @@ class MusicGenModel(nn.Module):
         melody_conditioning: Optional[mx.array] = None,
         style_conditioning: Optional[mx.array] = None,
         style_coef: float = 5.0,
+        progress_callback: object = None,
     ) -> mx.array:
         """Autoregressive generation with codebook delay pattern and CFG.
 
@@ -250,7 +251,10 @@ class MusicGenModel(nn.Module):
         # once on step 0 and reused for all subsequent steps
         cross_kv_caches = [CrossAttentionKVCache() for _ in range(len(self.layers))]
 
+        _progress_fn = progress_callback if callable(progress_callback) else None
         for step in tqdm(range(max_steps), desc="Generating"):
+            if _progress_fn:
+                _progress_fn(step / max_steps)
             # Tile current token for CFG batch
             audio_input = mx.tile(audio_seq[:, step : step + 1], [batch_mult, 1, 1])
 

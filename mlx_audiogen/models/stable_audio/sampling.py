@@ -101,12 +101,16 @@ def sample_euler(
     global_cond: mx.array,
     cfg_scale: float,
     steps: int,
+    progress_callback: object = None,
 ) -> mx.array:
     """Euler (1st-order) ODE sampler for rectified flow.
 
     Fast but less accurate than RK4, especially with few steps.
     """
+    _progress_fn = progress_callback if callable(progress_callback) else None
     for i in tqdm(range(steps), desc="Euler sampling"):
+        if _progress_fn:
+            _progress_fn(i / steps)
         t_curr = float(timesteps[i])
         t_next = float(timesteps[i + 1])
         dt = t_next - t_curr
@@ -129,13 +133,17 @@ def sample_rk4(
     global_cond: mx.array,
     cfg_scale: float,
     steps: int,
+    progress_callback: object = None,
 ) -> mx.array:
     """Runge-Kutta 4th-order ODE sampler for rectified flow.
 
     More accurate than Euler (4th-order vs 1st-order) but requires
     4 model forward passes per step instead of 1.
     """
+    _progress_fn = progress_callback if callable(progress_callback) else None
     for i in tqdm(range(steps), desc="RK4 sampling"):
+        if _progress_fn:
+            _progress_fn(i / steps)
         t_curr = float(timesteps[i])
         t_next = float(timesteps[i + 1])
         dt = t_next - t_curr
