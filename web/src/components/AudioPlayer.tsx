@@ -21,12 +21,14 @@ export default function AudioPlayer({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [loadError, setLoadError] = useState(false);
 
   const settings = useStore((s) => s.settings);
   const setSourceBpm = useStore((s) => s.setSourceBpm);
@@ -42,7 +44,6 @@ export default function AudioPlayer({
     const audio = audioRef.current;
     if (!audio) return;
     audio.playbackRate = playbackRate;
-    // preservesPitch may be prefixed in some browsers
     type PitchAudio = HTMLAudioElement & {
       preservesPitch?: boolean;
       webkitPreservesPitch?: boolean;
@@ -76,6 +77,27 @@ export default function AudioPlayer({
     applySinkId(getGlobalSinkId());
     return onSinkIdChange(applySinkId);
   }, [applySinkId]);
+
+  /**
+   * Lazily initialize Web Audio API on first user interaction.
+   * This avoids the browser's autoplay policy blocking the AudioContext.
+   */
+  const ensureAudioContext = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || audioCtxRef.current) return;
+
+    const audioCtx = new AudioContext();
+    audioCtxRef.current = audioCtx;
+
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyserRef.current = analyser;
+
+    const source = audioCtx.createMediaElementSource(audio);
+    source.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    sourceRef.current = source;
+  }, []);
 
   const drawWaveform = useCallback(() => {
     const analyser = analyserRef.current;
@@ -116,22 +138,8 @@ export default function AudioPlayer({
     draw();
   }, []);
 
+  // Cleanup animation frame on unmount
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const audioCtx = new AudioContext();
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    analyserRef.current = analyser;
-
-    if (!sourceRef.current) {
-      const source = audioCtx.createMediaElementSource(audio);
-      source.connect(analyser);
-      analyser.connect(audioCtx.destination);
-      sourceRef.current = source;
-    }
-
     return () => {
       cancelAnimationFrame(animFrameRef.current);
     };
@@ -148,10 +156,24 @@ export default function AudioPlayer({
   const togglePlay = async () => {
     const audio = audioRef.current;
     if (!audio) return;
+
     if (isPlaying) {
       audio.pause();
     } else {
-      await audio.play();
+      // Initialize audio context on first play (requires user gesture)
+      ensureAudioContext();
+
+      // Resume AudioContext if suspended (browser autoplay policy)
+      if (audioCtxRef.current?.state === "suspended") {
+        await audioCtxRef.current.resume();
+      }
+
+      try {
+        await audio.play();
+      } catch (e) {
+        console.error("Playback failed:", e);
+        setLoadError(true);
+      }
     }
   };
 
@@ -173,7 +195,6 @@ export default function AudioPlayer({
       <audio
         ref={audioRef}
         src={src}
-        crossOrigin="anonymous"
         autoPlay={autoPlay}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
@@ -184,6 +205,7 @@ export default function AudioPlayer({
         onLoadedMetadata={() =>
           setDuration(audioRef.current?.duration ?? 0)
         }
+        onError={() => setLoadError(true)}
       />
 
       {/* Waveform canvas */}
@@ -194,15 +216,23 @@ export default function AudioPlayer({
         className="w-full h-12 rounded bg-surface-1"
       />
 
+      {loadError && (
+        <div className="text-xs text-error">
+          Failed to load audio. The file may be corrupted.
+        </div>
+      )}
+
       {/* Transport controls */}
       <div className="flex items-center gap-2">
         {/* Play/Pause */}
         <button
           onClick={togglePlay}
+          disabled={loadError}
           className="
             flex h-8 w-8 items-center justify-center rounded-full
             bg-accent text-surface-0 hover:bg-accent-hover
             transition-colors shrink-0
+            disabled:opacity-50 disabled:cursor-not-allowed
           "
         >
           {isPlaying ? (

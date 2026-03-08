@@ -406,6 +406,33 @@ def _get_pipeline(model_type: str) -> object:
     return pipeline
 
 
+def _trim_to_exact_duration(
+    audio: np.ndarray, target_seconds: float, sample_rate: int, channels: int
+) -> np.ndarray:
+    """Trim or pad audio to exactly the requested duration.
+
+    Models often produce slightly more or less audio than requested due to
+    codec frame boundaries and token-to-sample alignment. This ensures the
+    output is sample-exact for BPM-synced loop playback.
+    """
+    target_samples = int(round(target_seconds * sample_rate))
+
+    if channels > 1 and audio.ndim == 1:
+        # Interleaved stereo: total samples = frames * channels
+        target_total = target_samples * channels
+        if len(audio) > target_total:
+            audio = audio[:target_total]
+        elif len(audio) < target_total:
+            audio = np.pad(audio, (0, target_total - len(audio)))
+    else:
+        if len(audio) > target_samples:
+            audio = audio[:target_samples]
+        elif len(audio) < target_samples:
+            audio = np.pad(audio, (0, target_samples - len(audio)))
+
+    return audio
+
+
 def _generate_musicgen(
     req: GenerateRequest,
 ) -> tuple[np.ndarray, int, int]:
@@ -413,9 +440,13 @@ def _generate_musicgen(
     from mlx_audiogen.models.musicgen import MusicGenPipeline
 
     pipe: MusicGenPipeline = _get_pipeline("musicgen")  # type: ignore[assignment]
+
+    # Request extra time to compensate for codec frame boundary losses,
+    # then trim to the exact requested duration.
+    buffer_seconds = req.seconds + 0.5
     audio = pipe.generate(
         prompt=req.prompt,
-        seconds=req.seconds,
+        seconds=buffer_seconds,
         temperature=req.temperature,
         top_k=req.top_k,
         guidance_coef=req.guidance_coef,
@@ -428,6 +459,8 @@ def _generate_musicgen(
     channels = 1
     if pipe.config.decoder.num_codebooks > 4:
         channels = 2
+
+    audio = _trim_to_exact_duration(audio, req.seconds, pipe.sample_rate, channels)  # type: ignore[arg-type, assignment]
     return audio, pipe.sample_rate, channels  # type: ignore[return-value]
 
 
@@ -447,6 +480,8 @@ def _generate_stable_audio(
         seed=req.seed,
         sampler=req.sampler,
     )
+
+    audio = _trim_to_exact_duration(audio, req.seconds, 44100, 2)  # type: ignore[arg-type, assignment]
     return audio, 44100, 2  # type: ignore[return-value]
 
 
