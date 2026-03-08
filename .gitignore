@@ -38,3 +38,4 @@ uv.lock
 # Web UI
 web/node_modules/
 web/dist/
+web/*.tsbuildinfo
