@@ -569,6 +569,7 @@ void MLXAudioGenProcessor::getStateInformation (juce::MemoryBlock& destData)
     obj->setProperty ("keySignature", keySignature);
     obj->setProperty ("midiTrigger", midiTrigger);
     obj->setProperty ("looping", looping);
+    obj->setProperty ("exportFolder", exportFolder);
     obj->setProperty ("fxEnabled", fxEnabled);
     obj->setProperty ("eqLowGain", (double) eqLowGain);
     obj->setProperty ("eqMidGain", (double) eqMidGain);
@@ -626,6 +627,7 @@ void MLXAudioGenProcessor::setStateInformation (const void* data, int sizeInByte
         midiTrigger = (bool) obj->getProperty ("midiTrigger");
         looping = (bool) obj->getProperty ("looping");
 
+        exportFolder = obj->getProperty ("exportFolder").toString();
         fxEnabled = (bool) obj->getProperty ("fxEnabled");
         eqLowGain = (float) obj->getProperty ("eqLowGain");
         eqMidGain = (float) obj->getProperty ("eqMidGain");

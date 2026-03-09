@@ -287,6 +287,19 @@ MLXAudioGenEditor::MLXAudioGenEditor (MLXAudioGenProcessor& p)
 
     styleButton (exportAudioButton);
     exportAudioButton.onClick = [this] {
+        // If export folder is set, save there with auto-name
+        if (proc.exportFolder.isNotEmpty())
+        {
+            auto folder = juce::File (proc.exportFolder);
+            if (folder.isDirectory())
+            {
+                auto timestamp = juce::Time::getCurrentTime().formatted ("%Y%m%d_%H%M%S");
+                auto name = proc.instanceName.replaceCharacter (' ', '_') + "_" + timestamp + ".wav";
+                proc.exportAudio (folder.getChildFile (name));
+                return;
+            }
+        }
+        // Otherwise show file chooser
         auto chooser = std::make_shared<juce::FileChooser> (
             "Export Audio", juce::File(), "*.wav");
         chooser->launchAsync (juce::FileBrowserComponent::saveMode, [this, chooser] (const auto& fc) {
@@ -296,6 +309,34 @@ MLXAudioGenEditor::MLXAudioGenEditor (MLXAudioGenProcessor& p)
         });
     };
     addAndMakeVisible (exportAudioButton);
+
+    styleButton (setFolderButton);
+    setFolderButton.onClick = [this] {
+        auto startDir = proc.exportFolder.isNotEmpty()
+            ? juce::File (proc.exportFolder) : juce::File();
+        auto chooser = std::make_shared<juce::FileChooser> (
+            "Choose Export Folder", startDir);
+        chooser->launchAsync (juce::FileBrowserComponent::openMode
+                              | juce::FileBrowserComponent::canSelectDirectories,
+                              [this, chooser] (const auto& fc) {
+            auto folder = fc.getResult();
+            if (folder != juce::File() && folder.isDirectory())
+            {
+                proc.exportFolder = folder.getFullPathName();
+                folderLabel.setText (folder.getFileName(), juce::dontSendNotification);
+            }
+        });
+    };
+    addAndMakeVisible (setFolderButton);
+
+    folderLabel.setColour (juce::Label::textColourId, juce::Colour (dimTextColour));
+    folderLabel.setFont (juce::Font (10.0f));
+    if (proc.exportFolder.isNotEmpty())
+        folderLabel.setText (juce::File (proc.exportFolder).getFileName(),
+                             juce::dontSendNotification);
+    else
+        folderLabel.setText ("(ask each time)", juce::dontSendNotification);
+    addAndMakeVisible (folderLabel);
 
     // --- Status ---
     statusLabel.setColour (juce::Label::textColourId, juce::Colour (dimTextColour));
@@ -538,6 +579,13 @@ void MLXAudioGenEditor::resized()
     loadPresetButton.setBounds (presetRow.removeFromLeft (btnW));
     presetRow.removeFromLeft (4);
     exportAudioButton.setBounds (presetRow);
+    area.removeFromTop (3);
+
+    // Export folder
+    auto folderRow = area.removeFromTop (20);
+    setFolderButton.setBounds (folderRow.removeFromLeft (80));
+    folderRow.removeFromLeft (4);
+    folderLabel.setBounds (folderRow);
     area.removeFromTop (gap);
 
     // Effects

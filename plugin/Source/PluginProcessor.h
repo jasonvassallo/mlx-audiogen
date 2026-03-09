@@ -116,6 +116,9 @@ public:
     float reverbDamping { 0.5f }; // 0.0 to 1.0
     float reverbMix { 0.0f };     // 0.0 to 1.0 (0 = off)
 
+    // --- Save folder (user-configurable, e.g. Ableton's pinned folder) ---
+    juce::String exportFolder;  // Empty = ask each time, or set to a folder path
+
     // --- Preset / Export (Phase 4e) ---
     /** Save all parameters as a JSON preset file. */
     void savePreset (const juce::File& file);
