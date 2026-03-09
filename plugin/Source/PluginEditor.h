@@ -14,6 +14,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
     void timerCallback() override;
@@ -27,8 +28,12 @@ private:
     juce::TextEditor instanceNameInput;
 
     // Model & Prompt
-    juce::ComboBox modelSelector;
+    juce::ComboBox modelSelector, keySelector;
     juce::TextEditor promptInput;
+
+    // Prompt templates (5.6)
+    juce::ComboBox templateSelector;
+    juce::TextButton saveTemplateBtn { "+" };
 
     // Duration
     juce::ToggleButton barsModeToggle { "Bars" };
@@ -40,29 +45,32 @@ private:
     juce::Slider bpmSlider;
     juce::Label bpmLabel { {}, "BPM" }, bpmDisplay;
 
-    // Key
-    juce::ComboBox keySelector;
-
-    // MusicGen
+    // MusicGen / Stable Audio params
     juce::Slider temperatureSlider, topKSlider, guidanceSlider;
-    // Stable Audio
     juce::Slider stepsSlider, cfgScaleSlider;
     juce::ComboBox samplerSelector;
-
-    // Seed
     juce::Slider seedSlider;
 
-    // Transport
+    // Transport + generation
     juce::TextButton generateButton { "Generate" };
+    juce::TextButton variationsButton { "4 Variations" };
     juce::TextButton playButton { "Play" }, stopButton { "Stop" };
     juce::TextButton keepButton { "Keep" }, discardButton { "Discard" };
-    juce::TextButton dragButton { "Drag to DAW" };
+    juce::TextButton dragButton { "Drag" };
+    juce::ToggleButton loopToggle { "Loop" }, midiTriggerToggle { "MIDI" };
 
-    // Output gain
-    juce::Slider outputGainSlider;
-    juce::Slider loopFadeSlider;
-    juce::ToggleButton loopToggle { "Loop" };
-    juce::ToggleButton midiTriggerToggle { "MIDI Trigger" };
+    // Variation A/B/C/D (5.2 + 5.8)
+    juce::TextButton varButtons[MLXAudioGenProcessor::MAX_VARIATIONS];
+
+    // Sidechain (5.7)
+    juce::ToggleButton sidechainMelodyToggle { "SC→Melody" };
+    juce::ToggleButton sidechainStyleToggle { "SC→Style" };
+
+    // Session sync (5.10)
+    juce::TextButton publishSessionBtn { "Publish" };
+
+    // Output gain + crossfade
+    juce::Slider outputGainSlider, loopFadeSlider;
 
     // Effects
     juce::ToggleButton fxToggle { "FX" };
@@ -76,35 +84,36 @@ private:
     juce::Label trimInfoLabel;
 
     // Preset / Export
-    juce::TextButton savePresetButton { "Save" };
-    juce::TextButton loadPresetButton { "Load" };
-    juce::TextButton exportAudioButton { "Export" };
-    juce::TextButton setFolderButton { "Folder" };
+    juce::TextButton savePresetButton { "Save" }, loadPresetButton { "Load" };
+    juce::TextButton exportAudioButton { "Export" }, setFolderButton { "Folder" };
     juce::Label folderLabel;
 
     juce::Label statusLabel, errorLabel;
     juce::Rectangle<int> waveformBounds;
     float displayProgress { 0.0f };
 
-    // APVTS parameter attachments — keep Push 2 / automation in sync
-    using SliderAttach = juce::AudioProcessorValueTreeState::SliderAttachment;
-    using ButtonAttach = juce::AudioProcessorValueTreeState::ButtonAttachment;
-    using ComboAttach  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    // Waveform zoom/scroll (5.9)
+    float waveformZoom { 1.0f };   // 1.0 = full view, 4.0 = 4x zoom
+    float waveformScroll { 0.0f }; // 0.0 to 1.0 position
 
-    std::unique_ptr<ComboAttach>  modelAttach;
-    std::unique_ptr<SliderAttach> durationAttach, barsAttach, bpmAttach;
-    std::unique_ptr<ButtonAttach> barsModeAttach, dawBpmAttach;
-    std::unique_ptr<SliderAttach> tempAttach, topKAttach, guidanceAttach;
-    std::unique_ptr<SliderAttach> stepsAttach, cfgAttach;
-    std::unique_ptr<ComboAttach>  samplerAttach;
-    std::unique_ptr<SliderAttach> seedAttach;
-    std::unique_ptr<ButtonAttach> loopAttach, midiAttach, fxAttach;
-    std::unique_ptr<SliderAttach> compTAttach, compRAttach;
-    std::unique_ptr<SliderAttach> delayTAttach, delayMxAttach;
-    std::unique_ptr<SliderAttach> revSizeAttach, revMixAttach;
-    std::unique_ptr<SliderAttach> gainAttach, fadeAttach;
+    // APVTS attachments
+    using SA = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using BA = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using CA = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
-    // Colours
+    std::unique_ptr<CA> modelAttach;
+    std::unique_ptr<SA> durationAttach, barsAttach, bpmAttach;
+    std::unique_ptr<BA> barsModeAttach, dawBpmAttach;
+    std::unique_ptr<SA> tempAttach, topKAttach, guidanceAttach;
+    std::unique_ptr<SA> stepsAttach, cfgAttach;
+    std::unique_ptr<CA> samplerAttach;
+    std::unique_ptr<SA> seedAttach;
+    std::unique_ptr<BA> loopAttach, midiAttach, fxAttach;
+    std::unique_ptr<SA> compTAttach, compRAttach;
+    std::unique_ptr<SA> delayTAttach, delayMxAttach;
+    std::unique_ptr<SA> revSizeAttach, revMixAttach;
+    std::unique_ptr<SA> gainAttach, fadeAttach;
+
     static constexpr juce::uint32 bgColour       = 0xFF0A0A0A;
     static constexpr juce::uint32 panelColour     = 0xFF111111;
     static constexpr juce::uint32 surfaceColour   = 0xFF1A1A1A;
