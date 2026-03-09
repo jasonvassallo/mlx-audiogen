@@ -87,6 +87,8 @@ class GenerateRequest(BaseModel):
     sampler: str = Field(default="euler", pattern=r"^(euler|rk4)$")
     # General
     seed: Optional[int] = Field(default=None)
+    # Output mode: audio, midi, or both
+    output_mode: str = Field(default="audio", pattern=r"^(audio|midi|both)$")
     # Style/melody: paths are validated in _validate_audio_path() before use
     melody_path: Optional[str] = Field(default=None, max_length=1024)
     style_audio_path: Optional[str] = Field(default=None, max_length=1024)
@@ -106,6 +108,7 @@ class JobInfo(BaseModel):
     error: Optional[str] = None
     sample_rate: Optional[int] = None
     progress: float = 0.0  # 0.0 to 1.0
+    has_midi: bool = False
 
 
 class GenerateResponse(BaseModel):
@@ -183,6 +186,7 @@ class _Job:
         "channels",
         "error",
         "progress",
+        "midi_data",
     )
 
     def __init__(self, job_id: str, request: GenerateRequest):
@@ -196,6 +200,7 @@ class _Job:
         self.channels: int = 1
         self.error: str | None = None
         self.progress: float = 0.0
+        self.midi_data: bytes | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +267,7 @@ def list_jobs() -> list[JobInfo]:
             error=job.error,
             sample_rate=job.sample_rate,
             progress=job.progress,
+            has_midi=job.midi_data is not None,
         )
         for job in _jobs.values()
     ]
@@ -328,6 +334,7 @@ def get_status(job_id: str) -> JobInfo:
         error=job.error,
         sample_rate=job.sample_rate,
         progress=job.progress,
+        has_midi=job.midi_data is not None,
     )
 
 
@@ -360,6 +367,29 @@ def get_audio(job_id: str) -> Response:
     )
 
 
+@app.get("/api/midi/{job_id}")
+def get_midi(job_id: str) -> Response:
+    """Download generated MIDI file.
+
+    Available when output_mode is 'midi' or 'both'.
+    """
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"Job not found: {job_id}")
+    if job.status != JobStatus.DONE:
+        raise HTTPException(202, "Generation still in progress.")
+    if job.midi_data is None:
+        raise HTTPException(404, "No MIDI data for this job.")
+
+    return Response(
+        content=job.midi_data,
+        media_type="audio/midi",
+        headers={
+            "Content-Disposition": f'attachment; filename="{job_id}.mid"',
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Generation Worker
 # ---------------------------------------------------------------------------
@@ -386,6 +416,17 @@ def _run_generation(job: _Job) -> None:
         job.audio = audio
         job.sample_rate = sr
         job.channels = channels
+
+        # Generate MIDI if requested
+        output_mode = req.output_mode
+        if output_mode in ("midi", "both") and audio is not None:
+            from mlx_audiogen.shared.audio_to_midi import audio_to_midi
+
+            job.midi_data = audio_to_midi(audio, sr, bpm=120.0)
+
+        # In MIDI-only mode, we still keep the audio for the transcription
+        # but the client knows to fetch /api/midi instead of /api/audio
+
         job.status = JobStatus.DONE
         job.completed_at = time.time()
 
