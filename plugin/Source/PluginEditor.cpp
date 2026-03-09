@@ -248,6 +248,55 @@ MLXAudioGenEditor::MLXAudioGenEditor (MLXAudioGenProcessor& p)
     reverbMixSlider.onValueChange = [this] { proc.reverbMix = (float) reverbMixSlider.getValue(); };
     addAndMakeVisible (reverbMixSlider);
 
+    // --- Preset / Export buttons ---
+    auto styleButton = [this] (juce::TextButton& btn) {
+        btn.setColour (juce::TextButton::buttonColourId, juce::Colour (surfaceColour));
+        btn.setColour (juce::TextButton::textColourOffId, juce::Colour (textColour));
+    };
+
+    styleButton (savePresetButton);
+    savePresetButton.onClick = [this] {
+        auto chooser = std::make_shared<juce::FileChooser> (
+            "Save Preset", juce::File(), "*.mlxpreset");
+        chooser->launchAsync (juce::FileBrowserComponent::saveMode, [this, chooser] (const auto& fc) {
+            auto file = fc.getResult();
+            if (file != juce::File())
+                proc.savePreset (file.withFileExtension ("mlxpreset"));
+        });
+    };
+    addAndMakeVisible (savePresetButton);
+
+    styleButton (loadPresetButton);
+    loadPresetButton.onClick = [this] {
+        auto chooser = std::make_shared<juce::FileChooser> (
+            "Load Preset", juce::File(), "*.mlxpreset");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode, [this, chooser] (const auto& fc) {
+            auto file = fc.getResult();
+            if (file != juce::File())
+            {
+                proc.loadPreset (file);
+                // Refresh UI to match loaded state
+                modelSelector.setSelectedId (proc.modelType == "stable_audio" ? 2 : 1);
+                promptInput.setText (proc.prompt);
+                durationSlider.setValue (proc.seconds);
+                updateUIState();
+            }
+        });
+    };
+    addAndMakeVisible (loadPresetButton);
+
+    styleButton (exportAudioButton);
+    exportAudioButton.onClick = [this] {
+        auto chooser = std::make_shared<juce::FileChooser> (
+            "Export Audio", juce::File(), "*.wav");
+        chooser->launchAsync (juce::FileBrowserComponent::saveMode, [this, chooser] (const auto& fc) {
+            auto file = fc.getResult();
+            if (file != juce::File())
+                proc.exportAudio (file.withFileExtension ("wav"));
+        });
+    };
+    addAndMakeVisible (exportAudioButton);
+
     // --- Status ---
     statusLabel.setColour (juce::Label::textColourId, juce::Colour (dimTextColour));
     statusLabel.setFont (juce::Font (11.0f));
@@ -481,6 +530,16 @@ void MLXAudioGenEditor::resized()
     stopButton.setBounds (transportRow.removeFromLeft (80));
     area.removeFromTop (gap);
 
+    // Preset / Export
+    auto presetRow = area.removeFromTop (24);
+    int btnW = (presetRow.getWidth() - 8) / 3;
+    savePresetButton.setBounds (presetRow.removeFromLeft (btnW));
+    presetRow.removeFromLeft (4);
+    loadPresetButton.setBounds (presetRow.removeFromLeft (btnW));
+    presetRow.removeFromLeft (4);
+    exportAudioButton.setBounds (presetRow);
+    area.removeFromTop (gap);
+
     // Effects
     fxToggle.setBounds (area.removeFromTop (rowH));
     area.removeFromTop (3);
@@ -553,6 +612,7 @@ void MLXAudioGenEditor::timerCallback()
 
     playButton.setEnabled (proc.hasAudioLoaded());
     stopButton.setEnabled (proc.hasAudioLoaded());
+    exportAudioButton.setEnabled (proc.hasAudioLoaded());
     playButton.setButtonText (proc.isPlaying() ? "Pause" : "Play");
 
     statusLabel.setText (proc.getStatusMessage(), juce::dontSendNotification);

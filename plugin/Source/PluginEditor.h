@@ -83,6 +83,11 @@ private:
     juce::Slider reverbSizeSlider;
     juce::Slider reverbMixSlider;
 
+    // --- Preset / Export (Phase 4e) ---
+    juce::TextButton savePresetButton { "Save Preset" };
+    juce::TextButton loadPresetButton { "Load Preset" };
+    juce::TextButton exportAudioButton { "Export WAV" };
+
     // --- Waveform ---
     juce::Rectangle<int> waveformBounds;
     float displayProgress { 0.0f };

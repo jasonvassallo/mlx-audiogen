@@ -116,6 +116,14 @@ public:
     float reverbDamping { 0.5f }; // 0.0 to 1.0
     float reverbMix { 0.0f };     // 0.0 to 1.0 (0 = off)
 
+    // --- Preset / Export (Phase 4e) ---
+    /** Save all parameters as a JSON preset file. */
+    void savePreset (const juce::File& file);
+    /** Load parameters from a JSON preset file. */
+    void loadPreset (const juce::File& file);
+    /** Export the generated audio as a WAV file. */
+    void exportAudio (const juce::File& file);
+
     HttpClient httpClient;
     ServerLauncher serverLauncher;
 

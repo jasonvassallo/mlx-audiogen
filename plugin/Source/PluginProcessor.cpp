@@ -498,6 +498,51 @@ juce::String MLXAudioGenProcessor::getLastError() const
 void MLXAudioGenProcessor::timerCallback() {}
 
 // ---------------------------------------------------------------------------
+// Preset / Export (Phase 4e)
+// ---------------------------------------------------------------------------
+
+void MLXAudioGenProcessor::savePreset (const juce::File& file)
+{
+    juce::MemoryBlock block;
+    getStateInformation (block);
+
+    auto text = juce::String::fromUTF8 (
+        static_cast<const char*> (block.getData()), (int) block.getSize());
+    file.replaceWithText (text);
+}
+
+void MLXAudioGenProcessor::loadPreset (const juce::File& file)
+{
+    auto text = file.loadFileAsString();
+    if (text.isEmpty())
+        return;
+
+    setStateInformation (text.toRawUTF8(), text.getNumBytesAsUTF8());
+}
+
+void MLXAudioGenProcessor::exportAudio (const juce::File& file)
+{
+    if (! hasAudio.load() || generatedAudio.getNumSamples() == 0)
+        return;
+
+    file.deleteFile();
+    auto stream = file.createOutputStream();
+    if (stream == nullptr)
+        return;
+
+    juce::WavAudioFormat wav;
+    auto writer = std::unique_ptr<juce::AudioFormatWriter> (
+        wav.createWriterFor (stream.release(),
+                             currentSampleRate,
+                             (unsigned int) generatedAudio.getNumChannels(),
+                             32, {}, 0));
+
+    if (writer != nullptr)
+        writer->writeFromAudioSampleBuffer (generatedAudio, 0,
+                                             generatedAudio.getNumSamples());
+}
+
+// ---------------------------------------------------------------------------
 // State persistence
 // ---------------------------------------------------------------------------
 
