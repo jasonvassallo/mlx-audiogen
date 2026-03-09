@@ -4,6 +4,7 @@
 #include "ServerLauncher.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
 
 /**
  * MLX AudioGen plugin processor.
@@ -90,6 +91,31 @@ public:
     /** Get effective duration in seconds (accounting for bar mode). */
     float getEffectiveSeconds() const;
 
+    // --- Effects parameters ---
+    bool fxEnabled { false };
+
+    // EQ (3-band: low shelf, mid peak, high shelf)
+    float eqLowGain { 0.0f };     // dB (-12 to +12)
+    float eqMidGain { 0.0f };     // dB (-12 to +12)
+    float eqMidFreq { 1000.0f };  // Hz (200-8000)
+    float eqHighGain { 0.0f };    // dB (-12 to +12)
+
+    // Compressor
+    float compThreshold { 0.0f };  // dB (-60 to 0)
+    float compRatio { 1.0f };      // 1:1 to 20:1
+    float compAttack { 10.0f };    // ms
+    float compRelease { 100.0f };  // ms
+
+    // Delay
+    float delayTime { 0.0f };     // ms (0 = off, up to 1000)
+    float delayFeedback { 0.3f }; // 0.0 to 0.95
+    float delayMix { 0.0f };      // 0.0 to 1.0
+
+    // Reverb
+    float reverbSize { 0.5f };    // 0.0 to 1.0
+    float reverbDamping { 0.5f }; // 0.0 to 1.0
+    float reverbMix { 0.0f };     // 0.0 to 1.0 (0 = off)
+
     HttpClient httpClient;
     ServerLauncher serverLauncher;
 
@@ -115,6 +141,21 @@ private:
     juce::CriticalSection stateLock;
 
     std::unique_ptr<juce::Thread> generationThread;
+
+    // DSP effects chain
+    juce::dsp::ProcessorChain<
+        juce::dsp::IIR::Filter<float>,    // Low shelf EQ
+        juce::dsp::IIR::Filter<float>,    // Mid peak EQ
+        juce::dsp::IIR::Filter<float>,    // High shelf EQ
+        juce::dsp::Compressor<float>,     // Compressor
+        juce::dsp::DelayLine<float>,      // Delay
+        juce::dsp::Reverb                 // Reverb
+    > fxChain;
+    juce::dsp::DelayLine<float> delayLine { 48000 }; // 1 sec max
+    juce::dsp::Reverb reverb;
+
+    void updateEffectsParameters();
+    void applyEffects (juce::AudioBuffer<float>& buffer);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MLXAudioGenProcessor)
 };

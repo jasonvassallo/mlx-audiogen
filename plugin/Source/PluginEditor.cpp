@@ -49,7 +49,7 @@ static const juce::StringArray KEY_OPTIONS = {
 MLXAudioGenEditor::MLXAudioGenEditor (MLXAudioGenProcessor& p)
     : AudioProcessorEditor (&p), proc (p)
 {
-    setSize (520, 720);
+    setSize (520, 820);
 
     // Instance name
     instanceNameInput.setColour (juce::TextEditor::backgroundColourId, juce::Colour (bgColour));
@@ -214,6 +214,39 @@ MLXAudioGenEditor::MLXAudioGenEditor (MLXAudioGenProcessor& p)
     midiTriggerToggle.setToggleState (proc.midiTrigger, juce::dontSendNotification);
     midiTriggerToggle.onClick = [this] { proc.midiTrigger = midiTriggerToggle.getToggleState(); };
     addAndMakeVisible (midiTriggerToggle);
+
+    // --- Effects ---
+    styleToggle (fxToggle);
+    fxToggle.setToggleState (proc.fxEnabled, juce::dontSendNotification);
+    fxToggle.onClick = [this] { proc.fxEnabled = fxToggle.getToggleState(); updateUIState(); };
+    addAndMakeVisible (fxToggle);
+
+    styleSlider (compThresholdSlider, -60, 0, 1, proc.compThreshold);
+    compThresholdSlider.setTextValueSuffix (" dB");
+    compThresholdSlider.onValueChange = [this] { proc.compThreshold = (float) compThresholdSlider.getValue(); };
+    addAndMakeVisible (compThresholdSlider);
+
+    styleSlider (compRatioSlider, 1, 20, 0.1, proc.compRatio);
+    compRatioSlider.setTextValueSuffix (":1");
+    compRatioSlider.onValueChange = [this] { proc.compRatio = (float) compRatioSlider.getValue(); };
+    addAndMakeVisible (compRatioSlider);
+
+    styleSlider (delayTimeSlider, 0, 1000, 1, proc.delayTime);
+    delayTimeSlider.setTextValueSuffix (" ms");
+    delayTimeSlider.onValueChange = [this] { proc.delayTime = (float) delayTimeSlider.getValue(); };
+    addAndMakeVisible (delayTimeSlider);
+
+    styleSlider (delayMixSlider, 0, 1, 0.01, proc.delayMix);
+    delayMixSlider.onValueChange = [this] { proc.delayMix = (float) delayMixSlider.getValue(); };
+    addAndMakeVisible (delayMixSlider);
+
+    styleSlider (reverbSizeSlider, 0, 1, 0.01, proc.reverbSize);
+    reverbSizeSlider.onValueChange = [this] { proc.reverbSize = (float) reverbSizeSlider.getValue(); };
+    addAndMakeVisible (reverbSizeSlider);
+
+    styleSlider (reverbMixSlider, 0, 1, 0.01, proc.reverbMix);
+    reverbMixSlider.onValueChange = [this] { proc.reverbMix = (float) reverbMixSlider.getValue(); };
+    addAndMakeVisible (reverbMixSlider);
 
     // --- Status ---
     statusLabel.setColour (juce::Label::textColourId, juce::Colour (dimTextColour));
@@ -448,6 +481,20 @@ void MLXAudioGenEditor::resized()
     stopButton.setBounds (transportRow.removeFromLeft (80));
     area.removeFromTop (gap);
 
+    // Effects
+    fxToggle.setBounds (area.removeFromTop (rowH));
+    area.removeFromTop (3);
+    if (proc.fxEnabled)
+    {
+        makeSliderRow (compThresholdSlider);
+        makeSliderRow (compRatioSlider);
+        makeSliderRow (delayTimeSlider);
+        makeSliderRow (delayMixSlider);
+        makeSliderRow (reverbSizeSlider);
+        makeSliderRow (reverbMixSlider);
+    }
+    area.removeFromTop (gap);
+
     // Status / Error
     statusLabel.setBounds (area.removeFromTop (16));
     errorLabel.setBounds (area.removeFromTop (16));
@@ -482,6 +529,14 @@ void MLXAudioGenEditor::updateUIState()
     bpmLabel.setVisible (! proc.useDawBpm);
 
     seedSlider.setVisible (! randomSeedToggle.getToggleState());
+
+    bool fx = proc.fxEnabled;
+    compThresholdSlider.setVisible (fx);
+    compRatioSlider.setVisible (fx);
+    delayTimeSlider.setVisible (fx);
+    delayMixSlider.setVisible (fx);
+    reverbSizeSlider.setVisible (fx);
+    reverbMixSlider.setVisible (fx);
 
     resized();
 }

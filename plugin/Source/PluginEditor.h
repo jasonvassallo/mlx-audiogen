@@ -74,6 +74,15 @@ private:
     juce::Label statusLabel;
     juce::Label errorLabel;
 
+    // --- Effects (Phase 4d) ---
+    juce::ToggleButton fxToggle { "FX" };
+    juce::Slider compThresholdSlider;
+    juce::Slider compRatioSlider;
+    juce::Slider delayTimeSlider;
+    juce::Slider delayMixSlider;
+    juce::Slider reverbSizeSlider;
+    juce::Slider reverbMixSlider;
+
     // --- Waveform ---
     juce::Rectangle<int> waveformBounds;
     float displayProgress { 0.0f };

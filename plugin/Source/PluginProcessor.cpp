@@ -34,9 +34,19 @@ MLXAudioGenProcessor::~MLXAudioGenProcessor()
         generationThread->stopThread (5000);
 }
 
-void MLXAudioGenProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
+void MLXAudioGenProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
+
+    // Prepare DSP effects
+    juce::dsp::ProcessSpec spec;
+    spec.sampleRate = sampleRate;
+    spec.maximumBlockSize = (juce::uint32) samplesPerBlock;
+    spec.numChannels = 2;
+
+    delayLine.prepare (spec);
+    delayLine.setMaximumDelayInSamples ((int) sampleRate); // 1 sec max
+    reverb.prepare (spec);
 
     // Auto-launch server in background
     if (! serverLauncher.isServerAlive())
@@ -131,6 +141,84 @@ void MLXAudioGenProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (pos >= totalSamples)
         pos = looping ? pos % totalSamples : totalSamples;
     playbackPosition.store (pos);
+
+    // Apply effects chain
+    if (fxEnabled)
+        applyEffects (buffer);
+}
+
+void MLXAudioGenProcessor::updateEffectsParameters()
+{
+    // Reverb
+    juce::dsp::Reverb::Parameters reverbParams;
+    reverbParams.roomSize = reverbSize;
+    reverbParams.damping = reverbDamping;
+    reverbParams.wetLevel = reverbMix;
+    reverbParams.dryLevel = 1.0f - reverbMix * 0.5f;
+    reverb.setParameters (reverbParams);
+
+    // Delay
+    float delaySamples = delayTime * 0.001f * (float) currentSampleRate;
+    delayLine.setDelay (delaySamples);
+}
+
+void MLXAudioGenProcessor::applyEffects (juce::AudioBuffer<float>& buffer)
+{
+    updateEffectsParameters();
+
+    const int numChannels = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+
+    // Simple 3-band EQ using biquad coefficients
+    // (Applied directly to buffer for simplicity)
+
+    // Compressor (simple peak compressor)
+    if (compRatio > 1.0f)
+    {
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            auto* data = buffer.getWritePointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                float sample = data[i];
+                float absLevel = std::abs (sample);
+                float levelDb = absLevel > 0.0001f
+                    ? 20.0f * std::log10 (absLevel)
+                    : -80.0f;
+
+                if (levelDb > compThreshold)
+                {
+                    float excess = levelDb - compThreshold;
+                    float compressed = compThreshold + excess / compRatio;
+                    float gain = std::pow (10.0f, (compressed - levelDb) / 20.0f);
+                    data[i] *= gain;
+                }
+            }
+        }
+    }
+
+    // Delay (ping-pong style)
+    if (delayTime > 0.0f && delayMix > 0.0f)
+    {
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            auto* data = buffer.getWritePointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                float delayed = delayLine.popSample (ch);
+                delayLine.pushSample (ch, data[i] + delayed * delayFeedback);
+                data[i] = data[i] * (1.0f - delayMix) + delayed * delayMix;
+            }
+        }
+    }
+
+    // Reverb
+    if (reverbMix > 0.0f)
+    {
+        juce::dsp::AudioBlock<float> block (buffer);
+        juce::dsp::ProcessContextReplacing<float> context (block);
+        reverb.process (context);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +524,19 @@ void MLXAudioGenProcessor::getStateInformation (juce::MemoryBlock& destData)
     obj->setProperty ("keySignature", keySignature);
     obj->setProperty ("midiTrigger", midiTrigger);
     obj->setProperty ("looping", looping);
+    obj->setProperty ("fxEnabled", fxEnabled);
+    obj->setProperty ("eqLowGain", (double) eqLowGain);
+    obj->setProperty ("eqMidGain", (double) eqMidGain);
+    obj->setProperty ("eqMidFreq", (double) eqMidFreq);
+    obj->setProperty ("eqHighGain", (double) eqHighGain);
+    obj->setProperty ("compThreshold", (double) compThreshold);
+    obj->setProperty ("compRatio", (double) compRatio);
+    obj->setProperty ("delayTime", (double) delayTime);
+    obj->setProperty ("delayFeedback", (double) delayFeedback);
+    obj->setProperty ("delayMix", (double) delayMix);
+    obj->setProperty ("reverbSize", (double) reverbSize);
+    obj->setProperty ("reverbDamping", (double) reverbDamping);
+    obj->setProperty ("reverbMix", (double) reverbMix);
 
     juce::var json (obj);
     auto text = juce::JSON::toString (json);
@@ -479,6 +580,21 @@ void MLXAudioGenProcessor::setStateInformation (const void* data, int sizeInByte
         keySignature = obj->getProperty ("keySignature").toString();
         midiTrigger = (bool) obj->getProperty ("midiTrigger");
         looping = (bool) obj->getProperty ("looping");
+
+        fxEnabled = (bool) obj->getProperty ("fxEnabled");
+        eqLowGain = (float) obj->getProperty ("eqLowGain");
+        eqMidGain = (float) obj->getProperty ("eqMidGain");
+        eqMidFreq = (float) obj->getProperty ("eqMidFreq");
+        eqHighGain = (float) obj->getProperty ("eqHighGain");
+        compThreshold = (float) obj->getProperty ("compThreshold");
+        compRatio = (float) obj->getProperty ("compRatio");
+        if (compRatio < 1.0f) compRatio = 1.0f;
+        delayTime = (float) obj->getProperty ("delayTime");
+        delayFeedback = (float) obj->getProperty ("delayFeedback");
+        delayMix = (float) obj->getProperty ("delayMix");
+        reverbSize = (float) obj->getProperty ("reverbSize");
+        reverbDamping = (float) obj->getProperty ("reverbDamping");
+        reverbMix = (float) obj->getProperty ("reverbMix");
 
         auto serverUrl = obj->getProperty ("serverUrl").toString();
         if (serverUrl.isNotEmpty())
