@@ -26,6 +26,9 @@ uv run mlx-audiogen-convert --model facebook/musicgen-small --output ./converted
 uv run mlx-audiogen-convert --model facebook/musicgen-style --output ./converted/musicgen-style
 uv run mlx-audiogen-convert --model stabilityai/stable-audio-open-small --output ./converted/stable-audio
 
+# Convert Demucs v4 for stem separation (requires torch: uv sync --extra convert)
+uv run mlx-audiogen-convert --model htdemucs --output ./converted/demucs-htdemucs
+
 # Run tests
 uv run pytest
 uv run pytest tests/test_specific.py::test_name  # single test
@@ -74,7 +77,7 @@ uv run python -c "from mlx_audiogen.models.musicgen import MusicGenPipeline; pri
 
 ## Architecture
 
-Two audio generation models sharing a common infrastructure layer:
+Two audio generation models + one source separation model sharing a common infrastructure layer:
 
 ```
 mlx_audiogen/
@@ -87,15 +90,17 @@ mlx_audiogen/
 │   ├── audio_to_midi.py  # Audio-to-MIDI transcription (onset detection + pitch estimation)
 │   ├── midi_to_prompt.py # MIDI-to-text prompt generation (key estimation, range analysis)
 │   ├── prompt_suggestions.py # AI prompt refinement (template engine + LLM hook)
-│   └── stem_separator.py    # Stem separation (FFT band-split + Demucs hook)
+│   └── stem_separator.py    # Stem separation (MLX Demucs → PyTorch Demucs → FFT band-split)
 ├── models/
 │   ├── musicgen/     # Autoregressive: T5 -> transformer decoder -> EnCodec decode
 │   │   ├── config.py, transformer.py, model.py, pipeline.py, convert.py
 │   │   ├── chroma.py # Chromagram extraction for melody conditioning
 │   │   ├── mert.py   # MERT feature extractor for style conditioning
 │   │   └── style_conditioner.py  # Style transformer + RVQ + BatchNorm
-│   └── stable_audio/ # Diffusion: T5 -> DiT (rectified flow) -> VAE decode
-│       ├── config.py, dit.py, vae.py, conditioners.py, sampling.py, pipeline.py, convert.py
+│   ├── stable_audio/ # Diffusion: T5 -> DiT (rectified flow) -> VAE decode
+│   │   ├── config.py, dit.py, vae.py, conditioners.py, sampling.py, pipeline.py, convert.py
+│   └── demucs/       # Source separation: HTDemucs v4 (hybrid U-Net + cross-transformer)
+│       ├── config.py, model.py, layers.py, transformer.py, spec.py, pipeline.py, convert.py
 ├── server/
 │   └── app.py        # FastAPI HTTP server with LRU pipeline cache + async jobs + static SPA serving
 ├── cli/
@@ -129,6 +134,8 @@ m4l/
 **Stable Audio pipeline flow:** tokenize text -> T5 encode + NumberEmbedder time conditioning -> rectified flow ODE sampling (euler/rk4) through DiT -> Oobleck VAE decode -> 44.1kHz stereo WAV
 
 **Stable Audio 1.0 variant:** adds a `seconds_start` NumberEmbedder alongside `seconds_total`, auto-detected from conditioner weights at load time
+
+**HTDemucs (Demucs v4) pipeline flow:** stereo 44.1kHz audio -> STFT (numpy, n_fft=4096) -> complex-as-channels -> instance normalize -> parallel spectral U-Net (Conv2d, stride along frequency) + temporal U-Net (Conv1d, stride along time) with DConv residual branches -> CrossTransformerEncoder (5 layers, alternating self-attn and cross-attn between branches) -> parallel decoder U-Nets with skip connections -> spectral branch: CaC mask -> iSTFT; temporal branch: denormalize -> output = spectral + temporal -> 4 sources (drums, bass, other, vocals). For long audio, uses overlap-add with triangle window (25% overlap).
 
 ## HTTP Server Architecture
 
@@ -243,6 +250,14 @@ MLX does not have an `interp` equivalent. Use `numpy.interp` for audio resamplin
 |---------|---------|-------|
 | small | `stabilityai/stable-audio-open-small` | `seconds_total` conditioning only |
 | 1.0 | `stabilityai/stable-audio-open-1.0` | Gated model; adds `seconds_start` conditioning |
+
+### Demucs (Source Separation)
+| Variant | Source | Parameters | Output |
+|---------|--------|-----------|--------|
+| htdemucs | `dl.fbaipublicfiles.com` | ~27M | 4 stems: drums, bass, other, vocals |
+| htdemucs_6s | `dl.fbaipublicfiles.com` | ~27M | 6 stems: adds guitar, piano |
+
+Conversion: `mlx-audiogen-convert --model htdemucs --output ./converted/demucs-htdemucs` (requires `torch` for one-time conversion from `.th` checkpoint format).
 
 ## Security Patterns
 

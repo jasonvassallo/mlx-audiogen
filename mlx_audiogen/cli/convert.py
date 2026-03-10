@@ -22,6 +22,10 @@ _KNOWN_STABLE_AUDIO_REPOS = {
     "stabilityai/stable-audio-open-small",
     "stabilityai/stable-audio-open-1.0",
 }
+_KNOWN_DEMUCS_VARIANTS = {
+    "htdemucs",
+    "htdemucs_6s",
+}
 
 # Valid HF repo ID: "org/model-name" (alphanumeric, hyphens, underscores, dots)
 _REPO_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$")
@@ -34,6 +38,8 @@ def _detect_model_type(repo_id: str) -> str | None:
         return "musicgen"
     if repo_id in _KNOWN_STABLE_AUDIO_REPOS:
         return "stable_audio"
+    if repo_id in _KNOWN_DEMUCS_VARIANTS:
+        return "demucs"
     # Fallback: match by org prefix for known organizations
     if repo_lower.startswith("facebook/musicgen"):
         return "musicgen"
@@ -74,20 +80,22 @@ def main():
 
     args = parser.parse_args()
 
-    # C2: Validate repo ID format
-    if not _REPO_ID_PATTERN.match(args.model):
+    # Demucs uses variant names (not HF repo IDs)
+    model_type = _detect_model_type(args.model)
+
+    # C2: Validate repo ID format (skip for demucs variants)
+    if model_type != "demucs" and not _REPO_ID_PATTERN.match(args.model):
         print(f"Error: Invalid repo ID format: {args.model}")
-        print("Expected format: 'organization/model-name'")
+        print("Expected format: 'organization/model-name' or demucs variant name")
         sys.exit(1)
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # M1: Use explicit repo matching instead of substring
-    model_type = _detect_model_type(args.model)
-
     # C2: Check against whitelist unless --trust-remote-code is set
-    all_known = _KNOWN_MUSICGEN_REPOS | _KNOWN_STABLE_AUDIO_REPOS
+    all_known = (
+        _KNOWN_MUSICGEN_REPOS | _KNOWN_STABLE_AUDIO_REPOS | _KNOWN_DEMUCS_VARIANTS
+    )
     if args.model not in all_known and not args.trust_remote_code:
         if model_type is not None:
             print(
@@ -118,6 +126,10 @@ def main():
         )
 
         convert_stable_audio(args.model, output_dir, dtype=args.dtype)
+    elif model_type == "demucs":
+        from mlx_audiogen.models.demucs.convert import convert_demucs
+
+        convert_demucs(output_dir, variant=args.model)
     else:
         print(f"Could not detect model type from repo ID: {args.model}")
         print(f"Known repos: {sorted(all_known)}")

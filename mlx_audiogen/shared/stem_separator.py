@@ -1,21 +1,31 @@
 """Audio stem separation.
 
-Provides two modes:
-1. Basic frequency-band splitting (no dependencies, always available)
-2. Demucs neural separation (optional, requires `demucs` package)
+Provides three modes (in priority order):
+1. Native MLX Demucs — production-quality drums/bass/vocals/other (no PyTorch)
+2. PyTorch Demucs (optional, requires ``demucs`` package)
+3. Basic frequency-band splitting (always available, no ML)
 
 The basic mode splits audio into frequency bands:
 - Bass: 0-250 Hz
 - Mid: 250-4000 Hz
 - High: 4000+ Hz
 
-Demucs mode (when available) splits into:
+Demucs modes split into:
 - Drums, Bass, Vocals, Other
 """
 
+from __future__ import annotations
+
 import io
+import logging
+from pathlib import Path
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
+
+# Cached pipeline to avoid reloading on each call
+_mlx_demucs_pipeline = None
 
 
 def separate_basic(
@@ -59,11 +69,76 @@ def separate_basic(
     return {"bass": bass, "mid": mid, "high": high}
 
 
+def separate_demucs_mlx(
+    audio: np.ndarray,
+    sample_rate: int,
+    weights_dir: str | None = None,
+) -> dict[str, np.ndarray] | None:
+    """Separate audio using native MLX Demucs.
+
+    Args:
+        audio: Audio array (1D mono or 2D stereo).
+        sample_rate: Sample rate in Hz.
+        weights_dir: Path to converted Demucs weights. Auto-discovers
+            ``~/.mlx-audiogen/demucs/`` and ``./converted/demucs-*`` if None.
+
+    Returns:
+        Dict mapping stem names to mono audio arrays, or None if unavailable.
+    """
+    global _mlx_demucs_pipeline  # noqa: PLW0603
+
+    if _mlx_demucs_pipeline is None:
+        wdir = _find_demucs_weights(weights_dir)
+        if wdir is None:
+            return None
+        try:
+            from ..models.demucs.pipeline import DemucsPipeline
+
+            _mlx_demucs_pipeline = DemucsPipeline.from_pretrained(str(wdir))
+            logger.info("Loaded MLX Demucs from %s", wdir)
+        except (FileNotFoundError, ImportError, OSError) as exc:
+            logger.debug("MLX Demucs not available: %s", exc)
+            return None
+
+    stems = _mlx_demucs_pipeline.separate(audio, sample_rate)
+    # Convert stereo stems to mono for consistency with basic mode
+    mono_stems: dict[str, np.ndarray] = {}
+    for name, stem in stems.items():
+        if stem.ndim > 1:
+            mono_stems[name] = stem.mean(axis=0).astype(np.float32)
+        else:
+            mono_stems[name] = stem.astype(np.float32)
+    return mono_stems
+
+
+def _find_demucs_weights(
+    explicit_dir: str | None,
+) -> Path | None:
+    """Search for converted Demucs weights."""
+
+    if explicit_dir is not None:
+        p = Path(explicit_dir)
+        if (p / "config.json").exists():
+            return p
+        return None
+
+    # Search common locations
+    candidates = [
+        Path.home() / ".mlx-audiogen" / "demucs",
+        Path("./converted/demucs-htdemucs"),
+        Path("./converted/demucs"),
+    ]
+    for c in candidates:
+        if c.exists() and (c / "config.json").exists():
+            return c
+    return None
+
+
 def separate_demucs(
     audio: np.ndarray,
     sample_rate: int,
 ) -> dict[str, np.ndarray] | None:
-    """Separate audio using Demucs (if installed).
+    """Separate audio using PyTorch Demucs (if installed).
 
     Returns None if Demucs is not available.
     """
@@ -111,21 +186,28 @@ def separate(
     audio: np.ndarray,
     sample_rate: int,
     use_demucs: bool = True,
+    demucs_weights_dir: str | None = None,
 ) -> dict[str, np.ndarray]:
     """Separate audio into stems.
 
-    Tries Demucs first (if available and requested), falls back to
-    basic frequency-band splitting.
+    Priority: MLX Demucs → PyTorch Demucs → basic FFT band-split.
 
     Args:
         audio: Audio array.
         sample_rate: Sample rate.
-        use_demucs: Whether to try Demucs first.
+        use_demucs: Whether to try Demucs (MLX or PyTorch).
+        demucs_weights_dir: Optional path to converted MLX Demucs weights.
 
     Returns:
         Dict mapping stem names to audio arrays.
     """
     if use_demucs:
+        # Try native MLX Demucs first
+        result = separate_demucs_mlx(audio, sample_rate, demucs_weights_dir)
+        if result is not None:
+            return result
+
+        # Fall back to PyTorch Demucs
         result = separate_demucs(audio, sample_rate)
         if result is not None:
             return result
