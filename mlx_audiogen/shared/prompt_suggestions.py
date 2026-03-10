@@ -156,9 +156,9 @@ def suggest_refinements(
         List of refined prompt strings.
     """
     if seed is not None:
-        rng = random.Random(seed)
+        rng = random.Random(seed)  # nosec B311 — not used for security
     else:
-        rng = random.Random()
+        rng = random.Random()  # nosec B311 — not used for security
 
     suggestions = []
     prompt_lower = prompt.lower()
