@@ -76,5 +76,6 @@ testpaths = ["tests"]
 [dependency-groups]
 dev = [
     "bandit>=1.9.4",
+    "mypy>=1.19.1",
     "pip-audit>=2.10.0",
 ]

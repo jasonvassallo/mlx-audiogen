@@ -218,7 +218,7 @@ export default function HistoryPanel() {
             {stemResults[entry.id] && (
               <div className="space-y-1.5 rounded border border-border bg-surface-0 p-2">
                 {Object.entries(stemResults[entry.id]!).map(
-                  ([stemName, stemId]) => {
+                  ([stemName, _stemId]) => {
                     const color =
                       STEM_COLORS[stemName] ?? DEFAULT_STEM_COLOR;
                     const audioUrl =
