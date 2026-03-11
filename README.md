@@ -1,6 +1,6 @@
 # mlx-audiogen
 
-Text-to-audio generation on Apple Silicon using [MLX](https://github.com/ml-explore/mlx). Supports **MusicGen** (including melody and stereo variants) and **Stable Audio Open**.
+Text-to-audio generation and stem separation on Apple Silicon using [MLX](https://github.com/ml-explore/mlx). Supports **MusicGen**, **Stable Audio Open**, and **Demucs v4** stem separation.
 
 Runs entirely on-device via Metal GPU — no cloud API needed.
 
@@ -15,6 +15,7 @@ Runs entirely on-device via Metal GPU — no cloud API needed.
 | MusicGen Style | base | Mono | 32 kHz | Autoregressive + MERT style conditioning |
 | Stable Audio Open | small | Stereo | 44.1 kHz | Diffusion (T5 + DiT + Oobleck VAE) |
 | Stable Audio Open | 1.0 | Stereo | 44.1 kHz | Diffusion (larger DiT, dual time conditioning) |
+| HTDemucs (Demucs v4) | htdemucs, htdemucs_6s | 4 or 6 stems | 44.1 kHz | Hybrid U-Net + Cross-Transformer |
 
 ## Quick Start
 
@@ -94,9 +95,21 @@ uv run mlx-audiogen \
 
 The `--style-audio` flag accepts any WAV file as a timbre reference. The pipeline uses dual-CFG with three forward passes per step to blend text semantics with audio style. `--style-coef` controls how strongly the text prompt influences the output relative to the style (default: 5.0). Style variants also work without `--style-audio` for text-only generation.
 
+### Stem Separation (Demucs v4)
+
+Separate any audio into drums, bass, vocals, and other stems using the native MLX port of Meta's HTDemucs:
+
+```bash
+# Convert Demucs weights (one-time, requires torch)
+uv sync --extra convert
+uv run mlx-audiogen-convert --model htdemucs --output ./converted/demucs-htdemucs
+```
+
+The pipeline auto-downloads pre-converted weights from [HuggingFace](https://huggingface.co/jasonvassallo/demucs-htdemucs-mlx) if no local weights are found. Inference runs 100% on MLX — PyTorch is only needed for one-time weight conversion.
+
 ## HTTP Server
 
-An optional FastAPI server enables integration with external tools like Ableton Live (via Max for Live), web UIs, or any HTTP client:
+An optional FastAPI server enables integration with external tools like Ableton Live (via Max for Live), the web UI, native plugins, or any HTTP client:
 
 ```bash
 # Install server dependencies
@@ -110,18 +123,56 @@ uv run mlx-audiogen-server \
   --weights-dir ./converted/musicgen-small \
   --weights-dir ./converted/stable-audio \
   --port 8420
+
+# Launch with web UI and auto-discover all converted models
+uv run mlx-audiogen-app
 ```
 
 ### API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/generate` | Submit a generation request (returns job ID) |
-| `GET` | `/api/status/{id}` | Poll job status (`queued` / `running` / `done` / `error`) |
-| `GET` | `/api/audio/{id}` | Download generated audio as WAV |
+| `POST` | `/api/generate` | Submit generation request (returns job ID). Supports `output_mode`: `audio`, `midi`, or `both` |
+| `GET` | `/api/status/{id}` | Poll job status (`queued`/`running`/`done`/`error`) with real-time `progress` (0.0-1.0) |
+| `GET` | `/api/audio/{id}` | Download generated WAV |
+| `GET` | `/api/midi/{id}` | Download generated MIDI (when `output_mode` is `midi` or `both`) |
 | `GET` | `/api/models` | List available models and loading status |
+| `GET` | `/api/jobs` | List all active/recent jobs |
+| `GET` | `/api/health` | Health check for browser heartbeat |
+| `POST` | `/api/suggest` | AI prompt suggestions (analyze prompt + return refined versions) |
+| `POST` | `/api/midi-to-prompt` | Convert MIDI file to descriptive text prompt |
+| `POST` | `/api/separate/{id}` | Separate audio into stems (drums/bass/vocals/other) |
+| `GET` | `/api/presets` | List shared presets |
+| `POST` | `/api/presets/{name}` | Save a preset |
+| `GET` | `/api/presets/{name}` | Load a preset |
 
-Interactive API docs are available at `http://localhost:8420/docs` when the server is running.
+Interactive API docs at `http://localhost:8420/docs` when running.
+
+## Web UI
+
+A React + TypeScript SPA with a dark, DAW-inspired interface:
+
+```bash
+# Development (hot reload, proxies API to :8420)
+cd web && npm install && npm run dev   # http://localhost:3000
+
+# Production (built and served by FastAPI)
+cd web && npm run build
+```
+
+Features: model selector, parameter controls, waveform visualization, BPM-synced looping, audio device selection, generation history with IndexedDB persistence.
+
+## Native Plugin (VST3 / AU)
+
+A JUCE-based plugin for Ableton Live, Logic Pro, and other DAWs:
+
+```bash
+cd plugin && git submodule update --init  # first time: clone JUCE
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release
+# Installs to ~/Library/Audio/Plug-Ins/{VST3,Components}/
+```
+
+Features: auto-server-launch, model auto-discovery, BPM sync, MIDI trigger, A/B/C/D variations, keep/discard workflow, beat-grid trimming, effects chain, Push 2 APVTS compatibility.
 
 ## Max for Live Integration
 
@@ -139,9 +190,9 @@ See [`m4l/README.md`](m4l/README.md) for message reference and outlet documentat
 - Apple Silicon Mac (M1/M2/M3/M4)
 - [uv](https://github.com/astral-sh/uv) package manager (recommended)
 
-For converting models that only provide PyTorch `.bin` weights (musicgen-medium, musicgen-large):
+For converting models that only provide PyTorch `.bin` or `.th` weights:
 ```bash
-uv sync --extra convert   # installs torch for .bin file loading
+uv sync --extra convert   # installs torch for weight conversion
 ```
 
 ## CLI Parameters
@@ -171,7 +222,7 @@ uv sync --extra convert   # installs torch for .bin file loading
 
 | Parameter | Description |
 |-----------|-------------|
-| `--model` | HuggingFace repo ID (e.g., `facebook/musicgen-small`) |
+| `--model` | HuggingFace repo ID (e.g., `facebook/musicgen-small`) or Demucs variant (`htdemucs`) |
 | `--output` | Output directory for converted weights |
 | `--dtype` | Optional: `float16`, `bfloat16`, or `float32` |
 | `--trust-remote-code` | Allow non-whitelisted repo IDs |
@@ -190,6 +241,8 @@ uv sync --extra convert   # installs torch for .bin file loading
 
 **Stable Audio:** `stabilityai/stable-audio-open-small`, `stabilityai/stable-audio-open-1.0`
 
+**Demucs:** `htdemucs`, `htdemucs_6s`
+
 > **Note:** Some HF repos (musicgen-medium, musicgen-large) only provide `pytorch_model.bin` files instead of safetensors. The converter handles both formats automatically, but PyTorch must be installed (`uv sync --extra convert`).
 
 > **Note:** `stabilityai/stable-audio-open-1.0` is a gated model. You must accept the license agreement on the [HuggingFace model page](https://huggingface.co/stabilityai/stable-audio-open-1.0) before converting.
@@ -198,15 +251,18 @@ uv sync --extra convert   # installs torch for .bin file loading
 
 ```
 mlx_audiogen/
-├── shared/           # T5 encoder, EnCodec, hub utils, audio I/O
+├── shared/           # T5 encoder, EnCodec, hub utils, audio I/O, MIDI, stem separation
 ├── models/
 │   ├── musicgen/     # Autoregressive: T5 -> transformer -> EnCodec decode
 │   │   ├── chroma.py # Chromagram extraction for melody conditioning
 │   │   ├── mert.py   # MERT feature extractor for style conditioning
 │   │   └── style_conditioner.py  # Style transformer + RVQ + BatchNorm
-│   └── stable_audio/ # Diffusion: T5 -> DiT (rectified flow) -> VAE decode
+│   ├── stable_audio/ # Diffusion: T5 -> DiT (rectified flow) -> VAE decode
+│   └── demucs/       # Source separation: HTDemucs v4 (hybrid U-Net + cross-transformer)
 ├── server/           # FastAPI HTTP server with LRU pipeline cache
 ├── cli/              # Unified CLI for generation and conversion
+web/                  # React + Vite + TypeScript SPA (dark/pro audio UI)
+plugin/               # JUCE native VST3/AU plugin
 m4l/                  # Max for Live Node.js HTTP client for Ableton
 ```
 
@@ -218,6 +274,8 @@ m4l/                  # Max for Live Node.js HTTP client for Ableton
 
 **Stable Audio**: Text -> T5 encode + time conditioning -> rectified flow ODE sampling through DiT -> Oobleck VAE decode -> 44.1kHz stereo WAV
 
+**HTDemucs (Demucs v4)**: Stereo 44.1kHz audio -> STFT -> complex-as-channels -> instance normalize -> parallel spectral U-Net + temporal U-Net with DConv residual branches -> CrossTransformerEncoder (5 layers, alternating self-attention and cross-attention) -> parallel decoder U-Nets with skip connections -> CaC mask + iSTFT + temporal denormalize -> 4 stems (drums, bass, other, vocals)
+
 ## Development
 
 ```bash
@@ -228,7 +286,7 @@ uv sync
 uv run ruff check .
 uv run ruff format .
 
-# Run tests
+# Run tests (100 total)
 uv run pytest
 
 # Type checking
@@ -249,6 +307,8 @@ Apache 2.0 — see [LICENSE](LICENSE).
 ## Links
 
 - [GitHub](https://github.com/jasonvassallo/mlx-audiogen)
-- [HuggingFace](https://huggingface.co/jasonvassallo/mlx-audiogen)
+- [HuggingFace](https://huggingface.co/jasonvassallo)
+- [Demucs MLX Weights](https://huggingface.co/jasonvassallo/demucs-htdemucs-mlx)
 - [MusicGen paper](https://arxiv.org/abs/2306.05284)
 - [Stable Audio Open paper](https://arxiv.org/abs/2407.14358)
+- [Demucs v4 paper](https://arxiv.org/abs/2211.08553)
