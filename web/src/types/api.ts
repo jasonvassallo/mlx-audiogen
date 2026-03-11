@@ -57,6 +57,15 @@ export interface JobInfo {
   error: string | null;
   sample_rate: number | null;
   progress: number; // 0.0 to 1.0
+  has_midi?: boolean;
+}
+
+/** Preset info from /api/presets listing. */
+export interface PresetInfo {
+  name: string;
+  filename: string;
+  prompt: string;
+  model: string;
 }
 
 /** Matches server's ModelInfo. */
