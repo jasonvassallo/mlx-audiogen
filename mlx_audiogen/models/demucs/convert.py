@@ -41,10 +41,15 @@ def _download(url: str, dest: Path) -> Path:
     return dest
 
 
-def _is_conv_weight(key: str) -> bool:
+def _is_conv_weight(key: str, state: dict) -> bool:
     """Check whether a key corresponds to a Conv weight that needs transposition."""
     if not key.endswith(".weight"):
         return False
+
+    # Channel projections at bottleneck (Conv1d kernel=1)
+    if key.startswith("channel_") and state[key].ndim == 3:
+        return True
+
     # Conv / ConvTranspose weights in encoder, decoder, tencoder, tdecoder, dconv
     for prefix in ("encoder.", "decoder.", "tencoder.", "tdecoder."):
         if key.startswith(prefix):
@@ -134,8 +139,8 @@ def _remap_transformer_keys(key: str) -> str:
 
     # LayerScale: gamma_1.scale, gamma_2.scale stay the same
 
-    # norm_out in transformer
-    key = key.replace(".norm_out.", ".norm_out_layer.gn.")
+    # norm_out in transformer → our GroupNorm attribute
+    key = key.replace(".norm_out.", ".norm_out_layer.")
 
     return key
 
@@ -172,6 +177,43 @@ def _remap_dconv_keys(key: str) -> str:
     return key
 
 
+def _install_demucs_stubs() -> None:
+    """Install stub ``demucs`` modules so ``torch.load`` can unpickle.
+
+    The Meta checkpoint uses pickle and references ``demucs.htdemucs.HTDemucs``.
+    We only need the state dict (plain tensors), not the model class, so a
+    dummy class that accepts any constructor args is sufficient.
+
+    Note: This is safe because we only load from Meta's canonical URLs
+    (dl.fbaipublicfiles.com) and only extract the tensor state dict.
+    """
+    import sys
+    import types
+
+    class _Stub:
+        """Catch-all class that absorbs any constructor args."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    stub_modules = [
+        "demucs",
+        "demucs.htdemucs",
+        "demucs.hdemucs",
+        "demucs.states",
+        "demucs.utils",
+        "demucs.demucs",
+        "demucs.spec",
+        "demucs.transformer",
+    ]
+    for name in stub_modules:
+        if name not in sys.modules:
+            mod = types.ModuleType(name)
+            mod.__dict__["HTDemucs"] = _Stub
+            mod.__dict__["HDemucs"] = _Stub
+            sys.modules[name] = mod
+
+
 def convert_demucs(
     output_dir: str,
     variant: str = "htdemucs",
@@ -182,6 +224,8 @@ def convert_demucs(
         output_dir: Directory to save converted weights.
         variant: Model variant (``htdemucs`` or ``htdemucs_6s``).
     """
+    from fractions import Fraction
+
     import torch
 
     if variant not in _WEIGHT_URLS:
@@ -194,6 +238,11 @@ def convert_demucs(
     filename = url.split("/")[-1]
     th_path = _download(url, cache_dir / filename)
 
+    # Install stub modules so torch.load can unpickle demucs classes.
+    # This is safe: we only load from Meta's canonical URLs and only
+    # extract the tensor state dict, not executable model code.
+    _install_demucs_stubs()
+
     logger.info("Loading PyTorch checkpoint: %s", th_path)
     pkg = torch.load(th_path, map_location="cpu", weights_only=False)  # nosec B614 — trusted Meta checkpoint
 
@@ -201,8 +250,17 @@ def convert_demucs(
     state_dict = pkg["state"]
     kwargs = pkg.get("kwargs", {})
 
-    # Build config
-    sources = pkg.get("args", [["drums", "bass", "other", "vocals"]])[0]
+    # Convert Fraction values to float for JSON serialization
+    for k, v in kwargs.items():
+        if isinstance(v, Fraction):
+            kwargs[k] = float(v)
+
+    # Build config — sources may be in kwargs (usual) or positional args
+    pkg_args = pkg.get("args", ())
+    sources = kwargs.get(
+        "sources",
+        pkg_args[0] if pkg_args else ["drums", "bass", "other", "vocals"],
+    )
     config_dict = {
         "sources": sources,
         "audio_channels": kwargs.get("audio_channels", 2),
@@ -251,7 +309,7 @@ def convert_demucs(
 
     # Transpose conv weights
     for key in list(np_state):
-        if _is_conv_weight(key):
+        if _is_conv_weight(key, np_state):
             is_tr = _is_conv_transpose(key)
             np_state[key] = _transpose_conv(np_state[key], is_tr)
 

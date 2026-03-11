@@ -216,6 +216,7 @@ class MusicGenModel(nn.Module):
         use_dual_cfg = style_conditioning is not None
 
         if use_dual_cfg:
+            assert style_conditioning is not None  # narrowing for mypy
             # Dual-CFG: 3 forward passes per step
             # [full (text+style), style-only, unconditional]
             # Full conditioning: concatenate style tokens + text tokens

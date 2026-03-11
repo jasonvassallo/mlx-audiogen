@@ -135,6 +135,8 @@ class MultiHeadAttention(nn.Module):
 
         # Cross-attention K/V caching: reuse pre-computed K/V if available
         if cross_kv_cache is not None and cross_kv_cache.is_populated:
+            assert cross_kv_cache.keys is not None  # guaranteed by is_populated
+            assert cross_kv_cache.values is not None
             keys = cross_kv_cache.keys
             values = cross_kv_cache.values
         else:

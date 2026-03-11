@@ -79,8 +79,8 @@ def separate_demucs_mlx(
     Args:
         audio: Audio array (1D mono or 2D stereo).
         sample_rate: Sample rate in Hz.
-        weights_dir: Path to converted Demucs weights. Auto-discovers
-            ``~/.mlx-audiogen/demucs/`` and ``./converted/demucs-*`` if None.
+        weights_dir: Path to converted Demucs weights. Searches local
+            directories first, then auto-downloads from HuggingFace.
 
     Returns:
         Dict mapping stem names to mono audio arrays, or None if unavailable.
@@ -88,14 +88,17 @@ def separate_demucs_mlx(
     global _mlx_demucs_pipeline  # noqa: PLW0603
 
     if _mlx_demucs_pipeline is None:
-        wdir = _find_demucs_weights(weights_dir)
-        if wdir is None:
-            return None
         try:
             from ..models.demucs.pipeline import DemucsPipeline
 
-            _mlx_demucs_pipeline = DemucsPipeline.from_pretrained(str(wdir))
-            logger.info("Loaded MLX Demucs from %s", wdir)
+            wdir = _find_demucs_weights(weights_dir)
+            if wdir is not None:
+                _mlx_demucs_pipeline = DemucsPipeline.from_pretrained(str(wdir))
+                logger.info("Loaded MLX Demucs from %s", wdir)
+            else:
+                # Auto-download from HuggingFace (default repo)
+                _mlx_demucs_pipeline = DemucsPipeline.from_pretrained()
+                logger.info("Loaded MLX Demucs from HuggingFace")
         except (FileNotFoundError, ImportError, OSError) as exc:
             logger.debug("MLX Demucs not available: %s", exc)
             return None

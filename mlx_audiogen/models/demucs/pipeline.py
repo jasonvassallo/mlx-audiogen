@@ -16,12 +16,20 @@ logger = logging.getLogger(__name__)
 _FORCE_COMPUTE = getattr(mx, "ev" + "al")
 
 
+DEFAULT_DEMUCS_REPO = "jasonvassallo/demucs-htdemucs-mlx"
+
+
 class DemucsPipeline:
     """High-level stem separation pipeline.
 
     Usage::
 
+        # Auto-download from HuggingFace:
+        pipeline = DemucsPipeline.from_pretrained()
+
+        # Or use a local path:
         pipeline = DemucsPipeline.from_pretrained("./converted/demucs-htdemucs")
+
         stems = pipeline.separate(audio_np, sample_rate=44100)
         # stems = {"drums": np.ndarray, "bass": ..., "other": ..., "vocals": ...}
     """
@@ -31,9 +39,28 @@ class DemucsPipeline:
         self.config = config
 
     @classmethod
-    def from_pretrained(cls, weights_dir: str) -> "DemucsPipeline":
-        """Load a converted Demucs model."""
-        wdir = Path(weights_dir)
+    def from_pretrained(
+        cls, path_or_repo: str = DEFAULT_DEMUCS_REPO
+    ) -> "DemucsPipeline":
+        """Load a converted Demucs model from local path or HuggingFace.
+
+        Args:
+            path_or_repo: Local directory containing ``config.json`` and
+                ``model.safetensors``, or a HuggingFace repo ID.
+                Defaults to ``jasonvassallo/demucs-htdemucs-mlx``.
+        """
+        wdir = Path(path_or_repo)
+        if not wdir.exists():
+            from huggingface_hub import snapshot_download
+
+            wdir = Path(
+                snapshot_download(  # nosec B615 — known HF repo
+                    repo_id=path_or_repo,
+                    allow_patterns=["*.json", "*.safetensors"],
+                )
+            )
+            logger.info("Downloaded Demucs weights from %s", path_or_repo)
+
         config_path = wdir / "config.json"
         model_path = wdir / "model.safetensors"
 
@@ -50,7 +77,6 @@ class DemucsPipeline:
 
         model = HTDemucs(cfg)
         weights = load_safetensors(str(model_path))
-        # Convert numpy arrays to mx.array
         mx_weights = {k: mx.array(v) for k, v in weights.items()}
         model.load_weights(list(mx_weights.items()))
         _FORCE_COMPUTE(model.parameters())

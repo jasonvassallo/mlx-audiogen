@@ -384,9 +384,9 @@ def convert_musicgen_style(
             if "transformer." in style_key and "in_proj_weight" in style_key:
                 _split_fused_style_attn(style_key, val, style_state)
                 continue
-            style_key = _remap_style_key(style_key)
-            if style_key is not None:
-                style_state[style_key] = val
+            remapped_style_key = _remap_style_key(style_key)
+            if remapped_style_key is not None:
+                style_state[remapped_style_key] = val
             continue
 
         # --- Decoder transformer ---

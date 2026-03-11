@@ -10,7 +10,7 @@ import mlx.nn as nn
 import numpy as np
 
 from .config import DemucsConfig
-from .layers import HDecLayer, HEncLayer, ScaledEmbedding
+from .layers import Conv1d, HDecLayer, HEncLayer, ScaledEmbedding
 from .spec import istft, pad1d, stft
 from .transformer import CrossTransformerEncoder
 
@@ -139,10 +139,27 @@ class HTDemucs(nn.Module):
                 self.freq_emb_scale = cfg.freq_emb
 
         # Transformer at bottleneck
-        transformer_channels = cfg.channels * cfg.growth ** (cfg.depth - 1)
+        transformer_channels = int(cfg.channels * cfg.growth ** (cfg.depth - 1))
+        t_dim = cfg.bottom_channels if cfg.bottom_channels else transformer_channels
+
+        # Channel projections when bottom_channels != encoder channels
+        if cfg.bottom_channels and cfg.bottom_channels != transformer_channels:
+            self.channel_upsampler = Conv1d(
+                transformer_channels, cfg.bottom_channels, 1
+            )
+            self.channel_downsampler = Conv1d(
+                cfg.bottom_channels, transformer_channels, 1
+            )
+            self.channel_upsampler_t = Conv1d(
+                transformer_channels, cfg.bottom_channels, 1
+            )
+            self.channel_downsampler_t = Conv1d(
+                cfg.bottom_channels, transformer_channels, 1
+            )
+
         if cfg.t_layers > 0:
             self.crosstransformer = CrossTransformerEncoder(
-                dim=transformer_channels,
+                dim=t_dim,
                 num_layers=cfg.t_layers,
                 num_heads=cfg.t_heads,
                 hidden_scale=cfg.t_hidden_scale,
@@ -272,9 +289,22 @@ class HTDemucs(nn.Module):
 
             saved.append(x)
 
-        # --- Cross-transformer ---
+        # --- Cross-transformer (with optional channel projection) ---
         if self.crosstransformer is not None:
+            if hasattr(self, "channel_upsampler"):
+                # Spectral: (B, C, Fr, T) → treat spatial dims as batch
+                B_x, C_x, Fr_x, T_x = x.shape
+                x = x.reshape(B_x, C_x, Fr_x * T_x)  # (B, C, Fr*T)
+                x = self.channel_upsampler(x)
+                x = x.reshape(B_x, -1, Fr_x, T_x)
+                xt = self.channel_upsampler_t(xt)
             x, xt = self.crosstransformer(x, xt)
+            if hasattr(self, "channel_downsampler"):
+                B_x, C_x, Fr_x, T_x = x.shape
+                x = x.reshape(B_x, C_x, Fr_x * T_x)
+                x = self.channel_downsampler(x)
+                x = x.reshape(B_x, -1, Fr_x, T_x)
+                xt = self.channel_downsampler_t(xt)
 
         # --- Decoder ---
         for idx, dec in enumerate(self.decoder):
