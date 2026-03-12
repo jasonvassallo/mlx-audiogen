@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 
 # ---------------------------------------------------------------------------
 # Tag Database
@@ -226,3 +227,109 @@ def test_enhance_with_llm_timeout_fallback():
             "timeout" in result["warning"].lower()
             or "timed out" in result["warning"].lower()
         )
+
+
+# ---------------------------------------------------------------------------
+# Server Endpoints
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def client(tmp_path):
+    """Create TestClient with isolated server state (no disk side effects)."""
+    import importlib
+
+    # Import the actual module (not the re-exported FastAPI instance)
+    srv = importlib.import_module("mlx_audiogen.server.app")
+
+    # Reset module-level state so tests don't leak into each other
+    srv._server_settings = {
+        "llm_model": None,
+        "ai_enhance": True,
+        "history_context_count": 50,
+    }
+    srv._llm_model_path = None
+    srv._llm_model_id = None
+    srv._prompt_memory = None
+    # Point paths to tmp_path so tests never touch real user data
+    srv._SETTINGS_PATH = tmp_path / "settings.json"
+    srv._MEMORY_PATH = tmp_path / "prompt_memory.json"
+
+    return TestClient(srv.app)
+
+
+def test_enhance_endpoint_template_fallback(client):
+    """POST /api/enhance falls back to template when no LLM."""
+    resp = client.post("/api/enhance", json={"prompt": "dark ambient"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["original"] == "dark ambient"
+    assert data["used_llm"] is False
+    assert "enhanced" in data
+    assert "analysis_tags" in data
+
+
+def test_tags_endpoint(client):
+    """GET /api/tags returns all tag categories."""
+    resp = client.get("/api/tags")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert set(data.keys()) == {"genre", "mood", "instrument", "era", "production"}
+    for tags in data.values():
+        assert isinstance(tags, list)
+        assert len(tags) > 0
+
+
+def test_llm_models_endpoint(client):
+    """GET /api/llm/models returns a list (possibly empty)."""
+    resp = client.get("/api/llm/models")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_llm_status_endpoint(client):
+    """GET /api/llm/status returns status dict."""
+    resp = client.get("/api/llm/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "model_id" in data
+    assert "loaded" in data
+
+
+def test_settings_get_defaults(client):
+    """GET /api/settings returns defaults."""
+    resp = client.get("/api/settings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ai_enhance"] is True
+    assert data["history_context_count"] == 50
+
+
+def test_settings_update(client):
+    """POST /api/settings persists changes."""
+    resp = client.post(
+        "/api/settings",
+        json={"ai_enhance": False, "history_context_count": 25},
+    )
+    assert resp.status_code == 200
+    # Verify persisted
+    resp2 = client.get("/api/settings")
+    data = resp2.json()
+    assert data["ai_enhance"] is False
+    assert data["history_context_count"] == 25
+
+
+def test_memory_get(client):
+    """GET /api/memory returns memory data."""
+    resp = client.get("/api/memory")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "history" in data
+    assert "style_profile" in data
+
+
+def test_memory_export(client):
+    """GET /api/memory/export returns JSON file."""
+    resp = client.get("/api/memory/export")
+    assert resp.status_code == 200
+    assert "application/json" in resp.headers.get("content-type", "")

@@ -19,6 +19,7 @@ Architecture:
 
 import argparse
 import io
+import json as json_mod
 import sys
 import time
 import uuid
@@ -31,7 +32,7 @@ from typing import Optional
 import numpy as np
 
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import Response
     from pydantic import BaseModel, Field
@@ -126,6 +127,21 @@ class ModelInfo(BaseModel):
     is_loaded: bool
 
 
+class EnhanceRequest(BaseModel):
+    """Request for POST /api/enhance."""
+
+    prompt: str = Field(..., min_length=1, max_length=5000)
+    memory_context: str = Field(default="", max_length=10000)
+
+
+class SettingsData(BaseModel):
+    """Server-side settings."""
+
+    llm_model: Optional[str] = None
+    ai_enhance: bool = True
+    history_context_count: int = Field(default=50, ge=0, le=200)
+
+
 # ---------------------------------------------------------------------------
 # Pipeline Cache
 # ---------------------------------------------------------------------------
@@ -213,6 +229,47 @@ _executor = ThreadPoolExecutor(max_workers=1)  # Single worker — MLX is GPU-bo
 _jobs: dict[str, _Job] = {}
 _weights_dirs: dict[str, str] = {}  # name -> path
 _max_jobs = 100
+
+# Phase 7b: LLM + Memory + Settings state
+_llm_model_path: str | None = None
+_llm_model_id: str | None = None
+_SETTINGS_PATH = Path.home() / ".mlx-audiogen" / "settings.json"
+_MEMORY_PATH = Path.home() / ".mlx-audiogen" / "prompt_memory.json"
+_prompt_memory: object | None = None  # Lazy-loaded PromptMemory
+_server_settings: dict = {
+    "llm_model": None,
+    "ai_enhance": True,
+    "history_context_count": 50,
+}
+
+
+def _load_settings() -> None:
+    """Load settings from disk if they exist."""
+    global _server_settings
+    if _SETTINGS_PATH.is_file():
+        try:
+            _server_settings.update(json_mod.loads(_SETTINGS_PATH.read_text()))
+        except (json_mod.JSONDecodeError, OSError):
+            pass
+
+
+def _save_settings() -> None:
+    """Persist settings to disk."""
+    _SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _SETTINGS_PATH.write_text(json_mod.dumps(_server_settings, indent=2))
+
+
+def _get_memory():
+    """Get or create the PromptMemory singleton."""
+    global _prompt_memory
+    if _prompt_memory is None:
+        from mlx_audiogen.shared.prompt_suggestions import PromptMemory
+
+        _prompt_memory = PromptMemory(_MEMORY_PATH)
+    return _prompt_memory
+
+
+_load_settings()
 
 # ---------------------------------------------------------------------------
 # FastAPI App
@@ -434,6 +491,143 @@ def load_shared_preset(name: str) -> dict:
 
     data = json_mod.loads(preset_file.read_text())
     return data
+
+
+# ---------------------------------------------------------------------------
+# Phase 7b: LLM Enhancement, Tags, Memory, Settings
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/enhance")
+def enhance_prompt(req: EnhanceRequest) -> dict:
+    """Enhance a prompt using local LLM or template fallback."""
+    from mlx_audiogen.shared.prompt_suggestions import enhance_with_llm
+
+    result = enhance_with_llm(
+        prompt=req.prompt,
+        model_path=_llm_model_path,
+        memory_context=req.memory_context,
+    )
+    return result
+
+
+@app.get("/api/tags")
+def get_tags() -> dict:
+    """Return the full tag database for autocomplete."""
+    from mlx_audiogen.shared.prompt_suggestions import TAG_DATABASE
+
+    return TAG_DATABASE
+
+
+@app.get("/api/llm/models")
+def list_llm_models() -> list[dict]:
+    """List locally available MLX LLM models."""
+    from mlx_audiogen.shared.prompt_suggestions import discover_mlx_models
+
+    return discover_mlx_models()
+
+
+@app.post("/api/llm/select")
+def select_llm_model(req: dict) -> dict:
+    """Select the active LLM model by ID."""
+    global _llm_model_path, _llm_model_id
+    model_id = req.get("model_id")
+    if model_id is None:
+        # Deselect
+        _llm_model_path = None
+        _llm_model_id = None
+        return {"model_id": None, "status": "deselected"}
+
+    from mlx_audiogen.shared.prompt_suggestions import discover_mlx_models
+
+    models = discover_mlx_models()
+    for m in models:
+        if m["id"] == model_id:
+            # Model found — store the ID (mlx-lm resolves HF cache paths)
+            _llm_model_id = model_id
+            _llm_model_path = model_id
+            return {"model_id": model_id, "status": "selected"}
+
+    raise HTTPException(404, f"Model not found: {model_id}")
+
+
+@app.get("/api/llm/status")
+def get_llm_status() -> dict:
+    """Return current LLM status."""
+    return {
+        "model_id": _llm_model_id,
+        "loaded": _llm_model_path is not None,
+        "idle_seconds": 0,
+        "memory_mb": 0,
+    }
+
+
+@app.get("/api/memory")
+def get_memory() -> dict:
+    """Return prompt memory data."""
+    mem = _get_memory()
+    return mem.to_dict()
+
+
+@app.delete("/api/memory")
+def clear_memory() -> dict:
+    """Clear all prompt memory."""
+    mem = _get_memory()
+    mem.clear()
+    return {"status": "cleared"}
+
+
+@app.get("/api/memory/export")
+def export_memory() -> Response:
+    """Export prompt memory as downloadable JSON."""
+    mem = _get_memory()
+    data = json_mod.dumps(mem.to_dict(), indent=2)
+    return Response(
+        content=data,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="prompt_memory.json"'},
+    )
+
+
+@app.post("/api/memory/import")
+async def import_memory(file: UploadFile) -> dict:
+    """Import prompt memory from uploaded JSON file."""
+    content = await file.read()
+    try:
+        data = json_mod.loads(content)
+    except json_mod.JSONDecodeError:
+        raise HTTPException(400, "Invalid JSON file")
+
+    if not isinstance(data, dict) or "history" not in data:
+        raise HTTPException(400, "Invalid memory format: missing 'history' key")
+
+    mem = _get_memory()
+    mem.history = data["history"]
+    mem._derive_profile()
+    mem.save()
+    return {"status": "imported", "entries": len(mem.history)}
+
+
+@app.get("/api/settings")
+def get_settings() -> dict:
+    """Return current server settings."""
+    return dict(_server_settings)
+
+
+@app.post("/api/settings")
+def update_settings(req: SettingsData) -> dict:
+    """Update server settings."""
+    global _server_settings, _llm_model_path, _llm_model_id
+    updates = req.model_dump(exclude_unset=True)
+    _server_settings.update(updates)
+    _save_settings()
+
+    # If LLM model changed, update the path
+    if "llm_model" in updates:
+        _llm_model_id = updates["llm_model"]
+        _llm_model_path = updates["llm_model"]
+
+    return dict(_server_settings)
 
 
 @app.post("/api/generate")
