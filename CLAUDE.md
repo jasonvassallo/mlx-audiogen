@@ -172,6 +172,17 @@ m4l/
 | `GET` | `/api/presets` | List shared presets from `~/.mlx-audiogen/presets/` |
 | `POST` | `/api/presets/{name}` | Save a preset to the shared directory |
 | `GET` | `/api/presets/{name}` | Load a preset by name |
+| `POST` | `/api/enhance` | Enhance prompt via LLM or template fallback |
+| `GET` | `/api/tags` | Tag database for autocomplete (genre/mood/instrument/era/production) |
+| `GET` | `/api/llm/models` | List discovered local LLM models |
+| `POST` | `/api/llm/select` | Select and load an LLM model |
+| `GET` | `/api/llm/status` | LLM status (loaded, memory, idle time) |
+| `GET` | `/api/memory` | Get prompt memory (history + style profile) |
+| `DELETE` | `/api/memory` | Clear prompt memory |
+| `GET` | `/api/memory/export` | Export prompt memory as JSON file |
+| `POST` | `/api/memory/import` | Import prompt memory from JSON file |
+| `GET` | `/api/settings` | Get server settings (LLM model, AI enhance, history context) |
+| `POST` | `/api/settings` | Update server settings |
 
 Interactive API docs at `http://localhost:8420/docs` when running.
 
@@ -183,16 +194,20 @@ Interactive API docs at `http://localhost:8420/docs` when running.
 - **Node management**: Volta pins Node 22 and npm 10 in `web/package.json`
 - **Dev mode**: `npm run dev` starts Vite on :3000, proxies `/api/*` to FastAPI on :8420
 - **Production**: `npm run build` outputs to `web/dist/`, served by FastAPI's static file mount
-- **Layout**: Tabbed left panel (Generate / Suggest tabs), right panel for history + audio playback
-- **Components**: TabBar (reusable tab header), SuggestPanel (prompt analysis + presets), ParameterPanel (model-aware sliders + output_mode dropdown), GenerateButton (with progress bar), AudioPlayer (Web Audio API waveform + `setSinkId` device selection), HistoryPanel (job history + MIDI download + stem separation), AudioDeviceSelector, Header (with PayPal support link)
-- **State**: Zustand store manages models, generation parameters, active job polling, history, prompt suggestions (with deduplication cache), presets, stem separation results (with eager blob download), output_mode, and active tab
-- **API client**: Typed fetch wrappers in `src/api/client.ts` for generate, suggest, presets, stems, MIDI, and model endpoints
+- **Layout**: Tabbed left panel (Generate / Suggest / Settings tabs), right panel for history + audio playback
+- **Components**: TabBar (reusable tab header), SuggestPanel (prompt analysis + presets), ParameterPanel (model-aware sliders + output_mode dropdown), GenerateButton (with progress bar), AudioPlayer (Web Audio API waveform + `setSinkId` device selection), HistoryPanel (job history + MIDI download + stem separation), AudioDeviceSelector, Header (with PayPal support link), EnhancePreview (LLM-enhanced prompt with Accept/Edit/Original), TagAutocomplete (color-coded inline tag suggestions), LLMSettingsPanel (LLM model selector + memory management)
+- **State**: Zustand store manages models, generation parameters, active job polling, history, prompt suggestions (with deduplication cache), presets, stem separation results (with eager blob download), output_mode, active tab, enhance flow, server settings, tag database, prompt memory, and LLM models
+- **API client**: Typed fetch wrappers in `src/api/client.ts` for generate, suggest, presets, stems, MIDI, model, enhance, tags, LLM, memory, and settings endpoints
 - **Prompt Suggestions**: `POST /api/suggest` returns analysis tags (genres, moods, instruments, missing elements) + refined prompt suggestions. UI shows colored tags + suggestion cards with Use/Copy buttons
 - **Presets**: Save/load `.mlxpreset` JSON files from `~/.mlx-audiogen/presets/`. UI validates names with `^[a-zA-Z0-9_-]{1,64}$` regex
 - **Stem Separation**: `POST /api/separate/{id}` splits audio into stems. UI shows color-coded inline `<audio>` players. Blob URLs eagerly downloaded to survive server's 5-minute job cleanup
 - **MIDI Output**: `output_mode` dropdown (audio/midi/both) in ParameterPanel. History shows MIDI download button when available
 - **Audio output**: Web Audio API plays through system default; AudioDeviceSelector allows choosing a specific output device via `setSinkId()`
 - **Launch**: `uv run mlx-audiogen-server --weights-dir <path> --open` starts server and opens browser
+- **LLM Enhancement**: `POST /api/enhance` enriches prompts via local LLM (`mlx-lm`) or template fallback. UI shows EnhancePreview card with analysis tags + Accept & Generate / Edit / Use Original buttons. Enhance button appears in PromptInput when AI enhance is enabled in server settings
+- **Tag Autocomplete**: TagAutocomplete dropdown appears below prompt textarea, filtered by last typed token (min 2 chars). Tags are color-coded by category: genre (amber), mood (emerald), instrument (sky), era (purple), production (rose)
+- **Prompt Memory**: Persisted at `~/.mlx-audiogen/prompt_memory.json` (max 2000 entries). Style profile auto-derived from history (top genres/moods/instruments, preferred duration). Export/Import/Clear via LLMSettingsPanel
+- **Server Settings**: LLM model selection, AI enhance toggle, history context slider (0-200). Persisted at `~/.mlx-audiogen/settings.json`. Separate from client-side IndexedDB settings (retention/BPM/pitch)
 
 ## Max for Live Integration
 
