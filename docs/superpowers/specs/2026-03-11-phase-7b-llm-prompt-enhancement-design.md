@@ -177,9 +177,13 @@ POST /api/enhance falls back to template engine (existing suggest_refinements)
 - `generation_count`: length of history array
 
 **LLM context injection:**
-- Last **50** history entries included in system prompt (prompt text only, newest first)
-- Rationale: Qwen3.5-9B has 32K context window. 50 prompts is approx 1500-2500 tokens — well within budget, gives rich style signal without diminishing returns. The style profile summary adds ~100 tokens.
-- Full style profile summary included
+- Number of history entries injected into LLM system prompt is **user-configurable** via a "History Context" slider in Settings
+- **Default: 50** prompts (newest first, prompt text only)
+- **Range: 0 to unlimited** — slider goes 0–100 with a text input for typing any number (including values > 100). Value of 0 means "all history" (no limit).
+- Rationale for 50 default: Qwen3.5-9B has 32K context window. 50 prompts is approx 1500-2500 tokens — well within budget, gives rich style signal without diminishing returns.
+- **Warning threshold:** If the user sets a value that would exceed ~8000 tokens (~160+ prompts), show a warning: "Large history context may slow down enhancement and reduce output quality"
+- Setting persisted to server-side `settings.json` as `history_context_count: int` (0 = unlimited)
+- Full style profile summary always included (regardless of history count setting)
 - System prompt instructs LLM to honor preferences but add creative variety
 
 **Memory import validation:**
@@ -213,7 +217,14 @@ The `activeTab` type in the Zustand store expands to `"generate" | "suggest" | "
    - Also shown as a compact toggle near the Generate button for quick access
    - State persisted to server-side `settings.json` (shared across all browser sessions)
 
-3. **Prompt Memory**
+3. **History Context**
+   - Slider (0–100) + editable text input for typing any number
+   - Default: 50. Value of 0 = "All history" (no limit)
+   - Label shows current value: "50 recent prompts" or "All history"
+   - Warning icon + tooltip at 160+: "Large context may slow enhancement"
+   - State persisted to server-side `settings.json`
+
+4. **Prompt Memory**
    - Style profile summary display (top genres, moods, instruments as colored tags)
    - Generation count + history size
    - Buttons: **Export** (download JSON), **Clear** (with confirmation dialog), **Import** (file upload)
@@ -223,7 +234,7 @@ The `activeTab` type in the Zustand store expands to `"generate" | "suggest" | "
    - Tooltip: "More themes coming soon"
 
 **Settings persistence strategy:**
-- **Server-side** (`~/.mlx-audiogen/settings.json`): LLM model selection, AI Enhance toggle — shared across all browser sessions connecting to this server
+- **Server-side** (`~/.mlx-audiogen/settings.json`): LLM model selection, AI Enhance toggle, history context count — shared across all browser sessions connecting to this server
 - **Client-side** (IndexedDB, existing): master BPM, pitch mode, history retention, audio device — per-browser settings that don't need server persistence
 
 ### API Endpoints (New)
@@ -278,6 +289,7 @@ class LLMSelectRequest(BaseModel):
 class SettingsData(BaseModel):
     llm_model: str | None = None  # model identifier (not path)
     ai_enhance: bool = True
+    history_context_count: int = Field(default=50, ge=0)  # 0 = unlimited
 ```
 
 ## Files to Modify
