@@ -1,5 +1,17 @@
 import { create } from "zustand";
-import type { GenerateRequest, JobInfo, ModelInfo, PresetInfo, PromptAnalysis } from "../types/api";
+import type {
+  EnhanceResponse,
+  GenerateRequest,
+  JobInfo,
+  LLMModelInfo,
+  LLMStatus,
+  ModelInfo,
+  PresetInfo,
+  PromptAnalysis,
+  PromptMemoryData,
+  ServerSettings,
+  TagDatabase,
+} from "../types/api";
 import {
   fetchModels,
   submitGeneration,
@@ -10,6 +22,16 @@ import {
   fetchPresets as apiFetchPresets,
   savePreset as apiSavePreset,
   loadPreset as apiLoadPreset,
+  enhancePrompt as apiEnhancePrompt,
+  fetchTags as apiFetchTags,
+  fetchLLMModels as apiFetchLLMModels,
+  selectLLMModel as apiSelectLLMModel,
+  fetchLLMStatus as apiFetchLLMStatus,
+  fetchMemory as apiFetchMemory,
+  clearMemory as apiClearMemory,
+  importMemory as apiImportMemory,
+  fetchServerSettings as apiFetchServerSettings,
+  updateServerSettings as apiUpdateServerSettings,
 } from "../api/client";
 import {
   saveEntry,
@@ -71,8 +93,38 @@ interface AppState {
   updateSettings: (settings: Partial<HistorySettings>) => Promise<void>;
 
   // --- Active Tab ---
-  activeTab: "generate" | "suggest";
-  setActiveTab: (tab: "generate" | "suggest") => void;
+  activeTab: "generate" | "suggest" | "settings";
+  setActiveTab: (tab: "generate" | "suggest" | "settings") => void;
+
+  // --- Enhance Flow ---
+  enhanceResult: EnhanceResponse | null;
+  enhanceLoading: boolean;
+  enhancePrompt: () => Promise<void>;
+  clearEnhanceResult: () => void;
+
+  // --- Server Settings ---
+  serverSettings: ServerSettings;
+  serverSettingsLoaded: boolean;
+  loadServerSettings: () => Promise<void>;
+  updateServerSetting: (updates: Partial<ServerSettings>) => Promise<void>;
+
+  // --- Tag Database ---
+  tagDatabase: TagDatabase | null;
+  tagsLoaded: boolean;
+  loadTags: () => Promise<void>;
+
+  // --- Prompt Memory ---
+  promptMemory: PromptMemoryData | null;
+  loadPromptMemory: () => Promise<void>;
+  clearPromptMemory: () => Promise<void>;
+  importPromptMemory: (file: File) => Promise<void>;
+
+  // --- LLM Models ---
+  llmModels: LLMModelInfo[];
+  llmStatus: LLMStatus | null;
+  loadLLMModels: () => Promise<void>;
+  selectLLM: (modelId: string) => Promise<void>;
+  loadLLMStatus: () => Promise<void>;
 
   // --- Prompt Suggestions ---
   suggestions: PromptAnalysis | null;
@@ -320,6 +372,112 @@ export const useStore = create<AppState>((set, get) => ({
   // --- Active Tab ---
   activeTab: "generate",
   setActiveTab: (tab) => set({ activeTab: tab }),
+
+  // --- Enhance Flow ---
+  enhanceResult: null,
+  enhanceLoading: false,
+  enhancePrompt: async () => {
+    const { params, enhanceLoading } = get();
+    if (enhanceLoading || !params.prompt.trim()) return;
+    set({ enhanceLoading: true });
+    try {
+      const result = await apiEnhancePrompt(params.prompt);
+      set({ enhanceResult: result, enhanceLoading: false });
+    } catch (e) {
+      console.error("Failed to enhance prompt:", e);
+      set({ enhanceLoading: false });
+    }
+  },
+  clearEnhanceResult: () => set({ enhanceResult: null }),
+
+  // --- Server Settings ---
+  serverSettings: { llm_model: null, ai_enhance: true, history_context_count: 50 },
+  serverSettingsLoaded: false,
+  loadServerSettings: async () => {
+    try {
+      const settings = await apiFetchServerSettings();
+      set({ serverSettings: settings, serverSettingsLoaded: true });
+    } catch (e) {
+      console.error("Failed to load server settings:", e);
+      set({ serverSettingsLoaded: true });
+    }
+  },
+  updateServerSetting: async (updates) => {
+    try {
+      const result = await apiUpdateServerSettings(updates);
+      set({ serverSettings: result });
+    } catch (e) {
+      console.error("Failed to update server settings:", e);
+    }
+  },
+
+  // --- Tag Database ---
+  tagDatabase: null,
+  tagsLoaded: false,
+  loadTags: async () => {
+    if (get().tagsLoaded) return;
+    try {
+      const tags = await apiFetchTags();
+      set({ tagDatabase: tags, tagsLoaded: true });
+    } catch (e) {
+      console.error("Failed to load tags:", e);
+    }
+  },
+
+  // --- Prompt Memory ---
+  promptMemory: null,
+  loadPromptMemory: async () => {
+    try {
+      const memory = await apiFetchMemory();
+      set({ promptMemory: memory });
+    } catch (e) {
+      console.error("Failed to load prompt memory:", e);
+    }
+  },
+  clearPromptMemory: async () => {
+    try {
+      await apiClearMemory();
+      set({ promptMemory: { history: [], style_profile: { top_genres: [], top_moods: [], top_instruments: [], preferred_duration: 0, generation_count: 0 } } });
+    } catch (e) {
+      console.error("Failed to clear prompt memory:", e);
+    }
+  },
+  importPromptMemory: async (file: File) => {
+    try {
+      await apiImportMemory(file);
+      await get().loadPromptMemory();
+    } catch (e) {
+      console.error("Failed to import prompt memory:", e);
+    }
+  },
+
+  // --- LLM Models ---
+  llmModels: [],
+  llmStatus: null,
+  loadLLMModels: async () => {
+    try {
+      const models = await apiFetchLLMModels();
+      set({ llmModels: models });
+    } catch (e) {
+      console.error("Failed to load LLM models:", e);
+    }
+  },
+  selectLLM: async (modelId: string) => {
+    try {
+      await apiSelectLLMModel(modelId);
+      await get().loadLLMStatus();
+    } catch (e) {
+      console.error("Failed to select LLM model:", e);
+    }
+  },
+  loadLLMStatus: async () => {
+    try {
+      const status = await apiFetchLLMStatus();
+      set({ llmStatus: status });
+    } catch (e) {
+      console.error("Failed to load LLM status:", e);
+    }
+  },
 
   // --- Prompt Suggestions ---
   suggestions: null,
