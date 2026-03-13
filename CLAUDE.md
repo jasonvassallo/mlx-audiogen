@@ -277,11 +277,16 @@ launchctl load ~/Library/LaunchAgents/com.jasonvassallo.mlx-audiogen-server.plis
 ```
 
 ### Mac Mini Model Inventory
-- **Audio gen**: `musicgen-small` (in `~/mlx-audiogen-data/converted/`)
-- **Demucs**: `demucs-htdemucs` (in `~/mlx-audiogen-data/converted/`)
+- **Audio gen** (in `~/mlx-audiogen-data/converted/`, auto-discovered via `--converted-dir`):
+  - `musicgen-small` (2.1GB) — text-to-audio, mono 32kHz
+  - `musicgen-melody` (5.7GB) — melody conditioning, mono 32kHz
+  - `musicgen-stereo-small` (1.1GB) — stereo variant, 32kHz
+  - `musicgen-style` (3.5GB) — style transfer from reference audio
+  - `stable-audio` (2.0GB) — diffusion model, stereo 44.1kHz
+- **Demucs**: `demucs-htdemucs` (164MB) — 4-stem source separation
 - **LLM**: `mlx-community/Qwen3.5-9B-6bit` (default for all tasks except vision)
 - **Vision**: `mlx-community/Qwen3.5-35B-A3B-4bit` (vision/complex tasks only)
-- All 12 converted MLX audio models published to `jasonvassallo/*` on HuggingFace
+- All 12 converted MLX audio models published to `jasonvassallo/mlx-*` on HuggingFace
 
 ## Max for Live Integration
 
