@@ -239,8 +239,8 @@ Browser → Cloudflare Edge → cloudflared tunnel (Mac Mini)
 Two LaunchAgents auto-start on login and restart on failure (`KeepAlive`):
 
 1. **Cloudflare Tunnel** (`com.jasonvassallo.cloudflared-tunnel`)
-   - Config: `~/.cloudflared/config.yml` (email-triage tunnel, multiple ingress rules)
-   - Serves: `musicgen.djvassallo.com`, `www.djvassallo.com`, `ssh.djvassallo.com`, etc.
+   - Config: `~/.cloudflared/config.yml` (email-triage tunnel, 7 ingress rules + catch-all)
+   - Serves: `musicgen.djvassallo.com`, `www.djvassallo.com`, `ssh/lima/vnc/smb.djvassallo.com`
    - Logs: `/opt/homebrew/var/log/cloudflared.log`
 
 2. **mlx-audiogen Server** (`com.jasonvassallo.mlx-audiogen-server`)
@@ -308,7 +308,7 @@ The JUCE plugin auto-connects to the best available server:
 
 ### Cloudflare Access Authentication
 Remote server is behind CF Access. Plugin uses a **Service Token** (non-interactive auth):
-- Headers: `CF-Access-Client-Id` + `CF-Access-Client-Secret` sent on all requests to non-localhost URLs
+- Headers: `CF-Access-Client-Id` + `CF-Access-Client-Secret` sent when service token is configured
 - Credentials stored in `~/.mlx-audiogen/config.json` (`cf_client_id`, `cf_client_secret`)
 - Setup: `./scripts/setup_plugin_remote.sh <client_id> <client_secret>`
 
