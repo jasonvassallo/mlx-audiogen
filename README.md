@@ -4,6 +4,8 @@ Text-to-audio generation and stem separation on Apple Silicon using [MLX](https:
 
 Runs entirely on-device via Metal GPU — no cloud API needed.
 
+**Full stack:** CLI, HTTP server, React web UI, VST3/AU plugin, Max for Live device, cloud deployment.
+
 ## Supported Models
 
 | Model | Variants | Output | Sample Rate | Architecture |
@@ -16,6 +18,8 @@ Runs entirely on-device via Metal GPU — no cloud API needed.
 | Stable Audio Open | small | Stereo | 44.1 kHz | Diffusion (T5 + DiT + Oobleck VAE) |
 | Stable Audio Open | 1.0 | Stereo | 44.1 kHz | Diffusion (larger DiT, dual time conditioning) |
 | HTDemucs (Demucs v4) | htdemucs, htdemucs_6s | 4 or 6 stems | 44.1 kHz | Hybrid U-Net + Cross-Transformer |
+
+Pre-converted MLX weights for all variants are available on [HuggingFace](https://huggingface.co/jasonvassallo).
 
 ## Quick Start
 
@@ -109,13 +113,16 @@ The pipeline auto-downloads pre-converted weights from [HuggingFace](https://hug
 
 ## HTTP Server
 
-An optional FastAPI server enables integration with external tools like Ableton Live (via Max for Live), the web UI, native plugins, or any HTTP client:
+An optional FastAPI server enables integration with the web UI, DAW plugins, Max for Live, or any HTTP client:
 
 ```bash
 # Install server dependencies
 uv sync --extra server
 
-# Start the server with one or more model weights
+# Launch app with web UI and auto-discover all converted models
+uv run mlx-audiogen-app
+
+# Or start server with specific models
 uv run mlx-audiogen-server --weights-dir ./converted/musicgen-small --port 8420
 
 # Multiple models (LRU cache keeps the 2 most recently used loaded)
@@ -124,8 +131,11 @@ uv run mlx-audiogen-server \
   --weights-dir ./converted/stable-audio \
   --port 8420
 
-# Launch with web UI and auto-discover all converted models
-uv run mlx-audiogen-app
+# Open browser on launch
+uv run mlx-audiogen-server --weights-dir ./converted/musicgen-small --open
+
+# Remote access (for web UI on other devices or cloud deployment)
+uv run mlx-audiogen-server --weights-dir ./converted/musicgen-small --host 0.0.0.0
 ```
 
 ### API Endpoints
@@ -140,11 +150,18 @@ uv run mlx-audiogen-app
 | `GET` | `/api/jobs` | List all active/recent jobs |
 | `GET` | `/api/health` | Health check for browser heartbeat |
 | `POST` | `/api/suggest` | AI prompt suggestions (analyze prompt + return refined versions) |
+| `POST` | `/api/enhance` | Enhance prompt via local LLM or template fallback |
 | `POST` | `/api/midi-to-prompt` | Convert MIDI file to descriptive text prompt |
 | `POST` | `/api/separate/{id}` | Separate audio into stems (drums/bass/vocals/other) |
 | `GET` | `/api/presets` | List shared presets |
 | `POST` | `/api/presets/{name}` | Save a preset |
 | `GET` | `/api/presets/{name}` | Load a preset |
+| `GET` | `/api/tags` | Tag database for prompt autocomplete |
+| `GET` | `/api/llm/models` | List discovered local LLM models |
+| `POST` | `/api/llm/select` | Select and load an LLM model |
+| `GET` | `/api/memory` | Get prompt memory (history + style profile) |
+| `GET` | `/api/settings` | Get server settings |
+| `POST` | `/api/settings` | Update server settings |
 
 Interactive API docs at `http://localhost:8420/docs` when running.
 
@@ -160,7 +177,16 @@ cd web && npm install && npm run dev   # http://localhost:3000
 cd web && npm run build
 ```
 
-Features: model selector, parameter controls, waveform visualization, BPM-synced looping, audio device selection, generation history with IndexedDB persistence.
+Features:
+- **Generation**: Model selector, prompt textarea with tag autocomplete, model-aware parameter sliders, BPM-based duration mode
+- **AI Enhancement**: Local LLM prompt enhancement with preview (accept/edit/use original)
+- **Suggestions**: Prompt analysis tags (genre, mood, instruments) + refined suggestion cards
+- **Playback**: Web Audio API waveform visualization, BPM-synced looping, time-stretch or vinyl pitch modes
+- **Transport Bar**: DAW-style bottom bar with master BPM, pitch mode, audio device selector, connection status
+- **History**: IndexedDB-persisted generation history with favorites, auto-delete retention, MIDI download
+- **Stem Separation**: Color-coded inline audio players for drums/bass/vocals/other
+- **Presets**: Save/load generation parameter presets
+- **Remote Server**: Connect to a remote mlx-audiogen server (e.g., cloud Mac Mini)
 
 ## Native Plugin (VST3 / AU)
 
@@ -172,7 +198,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Releas
 # Installs to ~/Library/Audio/Plug-Ins/{VST3,Components}/
 ```
 
-Features: auto-server-launch, model auto-discovery, BPM sync, MIDI trigger, A/B/C/D variations, keep/discard workflow, beat-grid trimming, effects chain, Push 2 APVTS compatibility.
+Features: auto-server-launch, local/remote server fallback (with Cloudflare Access auth), model auto-discovery, BPM sync, MIDI trigger, A/B/C/D variations, keep/discard workflow, beat-grid trimming, effects chain, Push 2 APVTS compatibility.
 
 ## Max for Live Integration
 
@@ -286,8 +312,10 @@ uv sync
 uv run ruff check .
 uv run ruff format .
 
-# Run tests (100 total)
-uv run pytest
+# Run tests
+uv run pytest                                     # unit tests (137 tests, ~13s)
+uv run pytest -m integration -v                   # integration tests (real weights + GPU)
+uv run pytest tests/test_specific.py::test_name   # single test
 
 # Type checking
 uv run mypy mlx_audiogen/
