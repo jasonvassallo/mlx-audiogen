@@ -10,6 +10,109 @@ interface AudioPlayerProps {
   sourceBpm: number;
 }
 
+/** Decode audio blob URL into a Float32Array of mono samples for waveform display. */
+async function decodeAudioBuffer(
+  src: string,
+): Promise<{ samples: Float32Array; sampleRate: number } | null> {
+  try {
+    const res = await fetch(src);
+    const arrayBuf = await res.arrayBuffer();
+    const ctx = new OfflineAudioContext(1, 1, 44100);
+    const decoded = await ctx.decodeAudioData(arrayBuf);
+    // Mix down to mono
+    const mono = decoded.getChannelData(0);
+    return { samples: mono, sampleRate: decoded.sampleRate };
+  } catch {
+    return null;
+  }
+}
+
+/** Draw a static waveform on a canvas. */
+function drawStaticWaveform(
+  canvas: HTMLCanvasElement,
+  samples: Float32Array,
+  playbackProgress: number,
+  zoom: number,
+  scrollOffset: number,
+  selectionStart: number | null,
+  selectionEnd: number | null,
+) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  ctx.scale(dpr, dpr);
+
+  // Background
+  ctx.fillStyle = "#111111";
+  ctx.fillRect(0, 0, w, h);
+
+  const totalSamples = samples.length;
+  const visibleFrac = 1 / zoom;
+  const startSample = Math.floor(scrollOffset * totalSamples);
+  const visibleSamples = Math.min(
+    Math.floor(visibleFrac * totalSamples),
+    totalSamples - startSample,
+  );
+
+  if (visibleSamples <= 0) return;
+
+  // Selection highlight
+  if (selectionStart !== null && selectionEnd !== null) {
+    const selStartFrac =
+      (selectionStart * totalSamples - startSample) / visibleSamples;
+    const selEndFrac =
+      (selectionEnd * totalSamples - startSample) / visibleSamples;
+    const x1 = Math.max(0, selStartFrac * w);
+    const x2 = Math.min(w, selEndFrac * w);
+    if (x2 > x1) {
+      ctx.fillStyle = "rgba(255, 107, 53, 0.12)";
+      ctx.fillRect(x1, 0, x2 - x1, h);
+      // Selection borders
+      ctx.strokeStyle = "rgba(255, 107, 53, 0.4)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x1, 0);
+      ctx.lineTo(x1, h);
+      ctx.moveTo(x2, 0);
+      ctx.lineTo(x2, h);
+      ctx.stroke();
+    }
+  }
+
+  // Waveform — peak-based rendering
+  const midY = h / 2;
+  ctx.fillStyle = "rgba(255, 107, 53, 0.7)";
+  for (let x = 0; x < w; x++) {
+    const s0 = startSample + Math.floor((x / w) * visibleSamples);
+    const s1 = startSample + Math.floor(((x + 1) / w) * visibleSamples);
+    let peak = 0;
+    for (let s = s0; s < s1 && s < totalSamples; s++) {
+      peak = Math.max(peak, Math.abs(samples[s]!));
+    }
+    const barH = peak * h * 0.9;
+    ctx.fillRect(x, midY - barH / 2, 1, barH || 0.5);
+  }
+
+  // Playback position line
+  if (playbackProgress >= 0) {
+    const posSample = playbackProgress * totalSamples;
+    const posFrac = (posSample - startSample) / visibleSamples;
+    if (posFrac >= 0 && posFrac <= 1) {
+      ctx.strokeStyle = "#e8e8e8";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(posFrac * w, 0);
+      ctx.lineTo(posFrac * w, h);
+      ctx.stroke();
+    }
+  }
+}
+
 export default function AudioPlayer({
   src,
   title,
@@ -20,7 +123,6 @@ export default function AudioPlayer({
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
-  const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
@@ -30,16 +132,41 @@ export default function AudioPlayer({
   const [duration, setDuration] = useState(0);
   const [loadError, setLoadError] = useState(false);
 
+  // Waveform state
+  const [waveformData, setWaveformData] = useState<Float32Array | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [selectionStart, setSelectionStart] = useState<number | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
+
   const settings = useStore((s) => s.settings);
   const setSourceBpm = useStore((s) => s.setSourceBpm);
 
-  // Calculate playback rate from BPM ratio
   const playbackRate =
     sourceBpm > 0 && settings.masterBpm > 0
       ? settings.masterBpm / sourceBpm
       : 1.0;
 
-  // Apply playback rate and preservesPitch whenever they change
+  // Decode waveform on src change
+  useEffect(() => {
+    setWaveformData(null);
+    setZoom(1);
+    setScrollOffset(0);
+    setSelectionStart(null);
+    setSelectionEnd(null);
+    let cancelled = false;
+    decodeAudioBuffer(src).then((result) => {
+      if (!cancelled && result) {
+        setWaveformData(result.samples);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  // Apply playback rate and pitch
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -56,13 +183,12 @@ export default function AudioPlayer({
     }
   }, [playbackRate, settings.preservePitch]);
 
-  // Apply loop state
   useEffect(() => {
     const audio = audioRef.current;
     if (audio) audio.loop = isLooping;
   }, [isLooping]);
 
-  // Apply audio output device (setSinkId)
+  // Audio device
   const applySinkId = useCallback((sinkId: string) => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -78,102 +204,146 @@ export default function AudioPlayer({
     return onSinkIdChange(applySinkId);
   }, [applySinkId]);
 
-  /**
-   * Lazily initialize Web Audio API on first user interaction.
-   * This avoids the browser's autoplay policy blocking the AudioContext.
-   */
+  // Redraw waveform on state changes
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !waveformData) return;
+
+    const progress = duration > 0 ? currentTime / duration : -1;
+    drawStaticWaveform(
+      canvas,
+      waveformData,
+      progress,
+      zoom,
+      scrollOffset,
+      selectionStart,
+      selectionEnd,
+    );
+  }, [
+    waveformData,
+    currentTime,
+    duration,
+    zoom,
+    scrollOffset,
+    selectionStart,
+    selectionEnd,
+  ]);
+
+  // Animate during playback
+  useEffect(() => {
+    if (!isPlaying) return;
+    const tick = () => {
+      setCurrentTime(audioRef.current?.currentTime ?? 0);
+      animFrameRef.current = requestAnimationFrame(tick);
+    };
+    animFrameRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animFrameRef.current);
+  }, [isPlaying]);
+
+  // Cleanup
+  useEffect(() => {
+    return () => cancelAnimationFrame(animFrameRef.current);
+  }, []);
+
   const ensureAudioContext = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || audioCtxRef.current) return;
-
     const audioCtx = new AudioContext();
     audioCtxRef.current = audioCtx;
-
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    analyserRef.current = analyser;
-
     const source = audioCtx.createMediaElementSource(audio);
-    source.connect(analyser);
-    analyser.connect(audioCtx.destination);
+    source.connect(audioCtx.destination);
     sourceRef.current = source;
   }, []);
-
-  const drawWaveform = useCallback(() => {
-    const analyser = analyserRef.current;
-    const canvas = canvasRef.current;
-    if (!analyser || !canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-
-    const draw = () => {
-      animFrameRef.current = requestAnimationFrame(draw);
-      analyser.getByteTimeDomainData(dataArray);
-
-      const { width, height } = canvas;
-      ctx.fillStyle = "#111111";
-      ctx.fillRect(0, 0, width, height);
-
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = "#ff6b35";
-      ctx.beginPath();
-
-      const sliceWidth = width / bufferLength;
-      let x = 0;
-      for (let i = 0; i < bufferLength; i++) {
-        const v = dataArray[i]! / 128.0;
-        const y = (v * height) / 2;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-        x += sliceWidth;
-      }
-      ctx.lineTo(width, height / 2);
-      ctx.stroke();
-    };
-
-    draw();
-  }, []);
-
-  // Cleanup animation frame on unmount
-  useEffect(() => {
-    return () => {
-      cancelAnimationFrame(animFrameRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (isPlaying) {
-      drawWaveform();
-    } else {
-      cancelAnimationFrame(animFrameRef.current);
-    }
-  }, [isPlaying, drawWaveform]);
 
   const togglePlay = async () => {
     const audio = audioRef.current;
     if (!audio) return;
-
     if (isPlaying) {
       audio.pause();
     } else {
-      // Initialize audio context on first play (requires user gesture)
       ensureAudioContext();
-
-      // Resume AudioContext if suspended (browser autoplay policy)
       if (audioCtxRef.current?.state === "suspended") {
         await audioCtxRef.current.resume();
       }
-
       try {
         await audio.play();
       } catch (e) {
         console.error("Playback failed:", e);
         setLoadError(true);
       }
+    }
+  };
+
+  // Click-to-seek on canvas
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isDragging) return;
+    const canvas = canvasRef.current;
+    const audio = audioRef.current;
+    if (!canvas || !audio || duration <= 0) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const visibleFrac = 1 / zoom;
+    const seekFrac = scrollOffset + x * visibleFrac;
+    audio.currentTime = Math.max(0, Math.min(duration, seekFrac * duration));
+    setCurrentTime(audio.currentTime);
+    // Clear selection on single click
+    setSelectionStart(null);
+    setSelectionEnd(null);
+  };
+
+  // Drag-to-select on canvas
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || duration <= 0) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const visibleFrac = 1 / zoom;
+    const frac = scrollOffset + x * visibleFrac;
+    setSelectionStart(frac);
+    setSelectionEnd(frac);
+    setIsDragging(true);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDragging || selectionStart === null) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const visibleFrac = 1 / zoom;
+    const frac = Math.max(0, Math.min(1, scrollOffset + x * visibleFrac));
+    setSelectionEnd(frac);
+  };
+
+  const handleMouseUp = () => {
+    if (isDragging && selectionStart !== null && selectionEnd !== null) {
+      const diff = Math.abs(selectionEnd - selectionStart);
+      if (diff < 0.005) {
+        // Too small — treat as click
+        setSelectionStart(null);
+        setSelectionEnd(null);
+      }
+    }
+    setIsDragging(false);
+  };
+
+  // Scroll-to-zoom (Cmd+scroll), scroll-to-pan
+  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    if (e.metaKey || e.ctrlKey) {
+      // Zoom
+      const newZoom = Math.max(1, Math.min(32, zoom + e.deltaY * -0.02));
+      setZoom(newZoom);
+      // Clamp scroll offset
+      const maxScroll = Math.max(0, 1 - 1 / newZoom);
+      setScrollOffset((prev) => Math.min(prev, maxScroll));
+    } else if (zoom > 1) {
+      // Pan
+      const maxScroll = 1 - 1 / zoom;
+      setScrollOffset((prev) =>
+        Math.max(0, Math.min(maxScroll, prev + e.deltaY * 0.001)),
+      );
     }
   };
 
@@ -208,13 +378,35 @@ export default function AudioPlayer({
         onError={() => setLoadError(true)}
       />
 
-      {/* Waveform canvas */}
+      {/* Waveform canvas — click to seek, drag to select, scroll to zoom/pan */}
       <canvas
         ref={canvasRef}
-        width={400}
-        height={48}
-        className="w-full h-12 rounded bg-surface-1"
+        className="w-full h-14 rounded bg-surface-1 cursor-crosshair"
+        onClick={handleCanvasClick}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
       />
+
+      {/* Zoom indicator */}
+      {zoom > 1 && (
+        <div className="flex items-center justify-between text-[10px] text-text-muted">
+          <span>
+            {zoom.toFixed(1)}x zoom — ⌘+scroll to zoom, scroll to pan
+          </span>
+          <button
+            onClick={() => {
+              setZoom(1);
+              setScrollOffset(0);
+            }}
+            className="text-accent hover:text-accent-hover"
+          >
+            Reset
+          </button>
+        </div>
+      )}
 
       {loadError && (
         <div className="text-xs text-error">
