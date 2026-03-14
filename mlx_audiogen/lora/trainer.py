@@ -307,7 +307,9 @@ class LoRATrainer:
             if avg_loss < self._best_loss:
                 self._best_loss = avg_loss
                 self._patience_counter = 0
-                best_params = {k: mx.array(v) for k, v in list_lora_params(model).items()}
+                best_params = {
+                    k: mx.array(v) for k, v in list_lora_params(model).items()
+                }
             else:
                 self._patience_counter += 1
 

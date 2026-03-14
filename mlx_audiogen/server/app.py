@@ -921,7 +921,7 @@ def get_train_status(job_id: str) -> dict:
         trainer = _active_trainer.get(job_id)
     if trainer is None:
         raise HTTPException(404, f"Training job not found: {job_id}")
-    return trainer.status  # type: ignore[union-attr]
+    return trainer.status  # type: ignore[attr-defined]
 
 
 @app.post("/api/train/stop/{job_id}")
@@ -931,7 +931,7 @@ def stop_training(job_id: str) -> dict:
         trainer = _active_trainer.get(job_id)
     if trainer is None:
         raise HTTPException(404, f"Training job not found: {job_id}")
-    trainer.stop()  # type: ignore[union-attr]
+    trainer.stop()  # type: ignore[attr-defined]
     return {"stopped": job_id}
 
 

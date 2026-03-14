@@ -29,8 +29,17 @@ uv run mlx-audiogen-convert --model stabilityai/stable-audio-open-small --output
 # Convert Demucs v4 for stem separation (requires torch: uv sync --extra convert)
 uv run mlx-audiogen-convert --model htdemucs --output ./converted/demucs-htdemucs
 
+# LoRA training
+uv run mlx-audiogen-train --data ./my-music/ --base-model musicgen-small --name my-style
+uv run mlx-audiogen-train --data ./my-music/ --base-model musicgen-small --name my-style --profile deep
+uv run mlx-audiogen-train --data ./my-music/ --base-model musicgen-small --name my-style --rank 32 --targets q_proj,v_proj
+
+# Generation with LoRA adapter
+uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lora my-style
+uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lora-path /path/to/lora/
+
 # Run tests
-uv run pytest                                     # unit tests only (148 tests, ~14s)
+uv run pytest                                     # unit tests only (184 tests, ~12s)
 uv run pytest tests/test_specific.py::test_name   # single test
 uv run pytest -m integration -v                   # integration tests (real weights + GPU, ~30s)
 uv run pytest -m "not integration"                # explicit: unit tests only
@@ -112,11 +121,17 @@ mlx_audiogen/
 │   │   ├── config.py, dit.py, vae.py, conditioners.py, sampling.py, pipeline.py, convert.py
 │   └── demucs/       # Source separation: HTDemucs v4 (hybrid U-Net + cross-transformer)
 │       ├── config.py, model.py, layers.py, transformer.py, spec.py, pipeline.py, convert.py
+├── lora/             # LoRA fine-tuning for MusicGen (Phase 9g)
+│   ├── config.py     # LoRAConfig dataclass + quick/balanced/deep profiles
+│   ├── inject.py     # LoRALinear class, apply_lora/remove_lora model surgery
+│   ├── dataset.py    # Audio scanning, chunking, delay pattern for training
+│   └── trainer.py    # Training loop with masked loss, early stopping, save/load
 ├── server/
 │   └── app.py        # FastAPI HTTP server with LRU pipeline cache + async jobs + static SPA serving
 ├── cli/
-│   ├── generate.py   # Unified CLI: --model {musicgen,stable_audio}
-│   └── convert.py    # Unified conversion: auto-detects model type from repo ID
+│   ├── generate.py   # Unified CLI: --model {musicgen,stable_audio} + --lora
+│   ├── convert.py    # Unified conversion: auto-detects model type from repo ID
+│   └── train.py      # LoRA training CLI: mlx-audiogen-train
 web/                    # React + Vite + TypeScript SPA (dark/pro audio UI)
 ├── src/
 │   ├── api/client.ts   # Typed fetch wrappers + dynamic server URL (local or remote)
@@ -159,6 +174,8 @@ m4l/
 
 **HTDemucs (Demucs v4) pipeline flow:** stereo 44.1kHz audio -> STFT (numpy, n_fft=4096) -> complex-as-channels (interleaved: [R0, I0, R1, I1]) -> instance normalize -> parallel spectral U-Net (Conv2d, stride along frequency) + temporal U-Net (Conv1d, stride along time) with DConv residual branches -> CrossTransformerEncoder (5 layers, alternating self-attn and cross-attn between branches) -> parallel decoder U-Nets with skip connections -> spectral branch: CaC mask -> iSTFT; temporal branch: denormalize -> output = spectral + temporal -> 4 sources (drums, bass, other, vocals). For long audio, uses overlap-add with triangle window (25% overlap). Non-44.1kHz input is resampled via reflect-padded FFT sinc method (alias-free, no boundary artifacts); stems are resampled back to the original sample rate on output.
 
+**LoRA fine-tuning flow:** scan data dir (WAV + metadata.jsonl) → load & chunk audio (10s default, max 40s) → EnCodec encode → apply codebook delay pattern → freeze base model + inject LoRALinear wrappers (rank A/B matrices, B=zero-init) → teacher-forcing with causal mask → masked cross-entropy loss (only valid non-BOS positions) → AdamW on LoRA params only → save best checkpoint as lora.safetensors + config.json to `~/.mlx-audiogen/loras/`. At generation time: `apply_lora()` wraps targeted nn.Linear layers, `load_weights(strict=False)` loads A/B matrices, output = `base(x) + scale * (x @ A @ B)` where scale = alpha/rank.
+
 ## HTTP Server Architecture
 
 `server/app.py` provides an async FastAPI server for tool integration (Max for Live, web UIs, external scripts):
@@ -199,6 +216,12 @@ m4l/
 | `POST` | `/api/memory/import` | Import prompt memory from JSON file |
 | `GET` | `/api/settings` | Get server settings (LLM model, AI enhance, history context) |
 | `POST` | `/api/settings` | Update server settings |
+| `GET` | `/api/loras` | List available LoRA adapters |
+| `GET` | `/api/loras/{name}` | Get LoRA adapter config |
+| `DELETE` | `/api/loras/{name}` | Delete a LoRA adapter |
+| `POST` | `/api/train` | Start LoRA training (returns job ID) |
+| `GET` | `/api/train/status/{id}` | Poll training progress |
+| `POST` | `/api/train/stop/{id}` | Stop active training |
 
 Interactive API docs at `http://localhost:8420/docs` when running.
 
@@ -210,10 +233,10 @@ Interactive API docs at `http://localhost:8420/docs` when running.
 - **Node management**: Volta pins Node 22 and npm 10 in `web/package.json`
 - **Dev mode**: `npm run dev` starts Vite on :3000, proxies `/api/*` to FastAPI on :8420
 - **Production**: `npm run build` outputs to `web/dist/`, served by FastAPI's static file mount
-- **Layout**: Three-layer vertical: Header at top, main area (tabbed sidebar w-80 + history panel), TransportBar at bottom. Sidebar tabs: Generate (model + prompt + params + generate button), Suggest (prompt analysis + presets), Settings (server URL + history retention + LLM config). TransportBar is a fixed-height DAW-style transport strip with Master BPM, pitch mode toggle, audio device selector, connection status, and generation progress
-- **Components**: TabBar (reusable tab header), TransportBar (DAW transport bar with global playback controls), ServerPanel (remote server URL config + connection test), SuggestPanel (prompt analysis + presets), ParameterPanel (model-aware sliders + output_mode dropdown), GenerateButton (with progress bar), AudioPlayer (Web Audio API waveform + `setSinkId` device selection), HistoryPanel (job history + MIDI download + stem separation), AudioDeviceSelector (supports compact mode for transport bar), Header (with PayPal support link), EnhancePreview (LLM-enhanced prompt with Accept/Edit/Original), TagAutocomplete (color-coded inline tag suggestions), LLMSettingsPanel (LLM model selector + memory management)
-- **State**: Zustand store manages models, generation parameters, active job polling, history, prompt suggestions (with deduplication cache), presets, stem separation results (with eager blob download), output_mode, active tab, enhance flow, server settings, tag database, prompt memory, LLM models, and server URL
-- **API client**: Typed fetch wrappers in `src/api/client.ts` with dynamic server URL for local or remote servers. Supports generate, suggest, presets, stems, MIDI, model, enhance, tags, LLM, memory, and settings endpoints
+- **Layout**: Three-layer vertical: Header at top, main area (tabbed sidebar w-80 + history panel), TransportBar at bottom. Sidebar tabs: Generate (model + prompt + LoRA selector + params + generate button), Suggest (prompt analysis + presets), Train (LoRA training UI with profile cards + progress + loss chart), Settings (server URL + history retention + LLM config + LoRA management). TransportBar is a fixed-height DAW-style transport strip with Master BPM, pitch mode toggle, audio device selector, connection status, and generation progress
+- **Components**: TabBar (reusable tab header), TransportBar (DAW transport bar with global playback controls), ServerPanel (remote server URL config + connection test), SuggestPanel (prompt analysis + presets), ParameterPanel (model-aware sliders + output_mode dropdown), GenerateButton (with progress bar), AudioPlayer (Web Audio API waveform + `setSinkId` device selection), HistoryPanel (job history + MIDI download + stem separation), AudioDeviceSelector (supports compact mode for transport bar), Header (with PayPal support link), EnhancePreview (LLM-enhanced prompt with Accept/Edit/Original), TagAutocomplete (color-coded inline tag suggestions), LLMSettingsPanel (LLM model selector + memory management), LoRASelector (dropdown with model compatibility warning), TrainPanel (LoRA training with profile cards, progress bar, loss chart)
+- **State**: Zustand store manages models, generation parameters, active job polling, history, prompt suggestions (with deduplication cache), presets, stem separation results (with eager blob download), output_mode, active tab, enhance flow, server settings, tag database, prompt memory, LLM models, server URL, LoRA adapters, and selected LoRA
+- **API client**: Typed fetch wrappers in `src/api/client.ts` with dynamic server URL for local or remote servers. Supports generate, suggest, presets, stems, MIDI, model, enhance, tags, LLM, memory, settings, LoRA listing, training, and deletion endpoints
 - **Prompt Suggestions**: `POST /api/suggest` returns analysis tags (genres, moods, instruments, missing elements) + refined prompt suggestions. UI shows colored tags + suggestion cards with Use/Copy buttons
 - **Presets**: Save/load `.mlxpreset` JSON files from `~/.mlx-audiogen/presets/`. UI validates names with `^[a-zA-Z0-9_-]{1,64}$` regex
 - **Stem Separation**: `POST /api/separate/{id}` splits audio into stems. UI shows color-coded inline `<audio>` players. Blob URLs eagerly downloaded to survive server's 5-minute job cleanup
