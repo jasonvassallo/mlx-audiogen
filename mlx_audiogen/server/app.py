@@ -96,6 +96,20 @@ class RateLimiter:
 
 _rate_limiter = RateLimiter()
 
+# ---------------------------------------------------------------------------
+# Enrichment / Credential / Taste singletons (Phase 9g-3)
+# ---------------------------------------------------------------------------
+
+from mlx_audiogen.credentials import CredentialManager
+from mlx_audiogen.library.enrichment import EnrichmentDB, EnrichmentManager
+from mlx_audiogen.library.taste.engine import TasteEngine
+
+_credential_manager = CredentialManager()
+_enrichment_db = EnrichmentDB()
+_enrichment_manager = EnrichmentManager(db=_enrichment_db, credentials=_credential_manager)
+_taste_engine = TasteEngine()
+_enrichment_job: dict | None = None
+
 # Paths exempt from rate limiting (health check for heartbeat polling)
 _RATE_LIMIT_EXEMPT = {"/api/health"}
 
@@ -470,6 +484,14 @@ def suggest_prompts(req: PromptSuggestRequest) -> dict:
     from mlx_audiogen.shared.prompt_suggestions import analyze_prompt
 
     analysis = analyze_prompt(req.prompt, count=req.count)
+
+    # Blend taste profile into suggestions
+    taste = _taste_engine.get_profile()
+    if taste.top_genres and analysis.get("suggestions"):
+        taste_hint = ", ".join(g.name for g in taste.top_genres[:2])
+        taste_suggestion = f"{req.prompt}, {taste_hint} style"
+        analysis["suggestions"].insert(0, taste_suggestion)
+
     return analysis
 
 
@@ -1107,9 +1129,19 @@ def get_library_tracks(
         offset=offset,
         limit=limit,
     )
+    # Add enrichment status to each track
+    try:
+        source_type = cache._get_source(source_id).type
+    except KeyError:
+        source_type = ""
+    track_dicts = [t.to_dict() for t in tracks]
+    for td in track_dicts:
+        etid = _enrichment_db.find_by_library_id(source_type, td["track_id"])
+        td["enrichment_status"] = _enrichment_db.get_enrichment_status(etid) if etid else "none"
+
     return {
-        "tracks": [t.to_dict() for t in tracks],
-        "count": len(tracks),
+        "tracks": track_dicts,
+        "count": len(track_dicts),
         "offset": offset,
         "limit": limit,
     }
@@ -1266,6 +1298,185 @@ async def import_collection(file: UploadFile) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Credential Endpoints (Phase 9g-3)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/credentials/status")
+def credentials_status():
+    return _credential_manager.status()
+
+
+@app.post("/api/credentials/{service}")
+def credentials_set(service: str, body: dict):
+    api_key = body.get("api_key", "")
+    if not api_key:
+        raise HTTPException(400, "api_key is required")
+    try:
+        _credential_manager.set(service, api_key)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"status": "saved", "service": service}
+
+
+@app.delete("/api/credentials/{service}")
+def credentials_delete(service: str):
+    try:
+        _credential_manager.delete(service)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"status": "deleted", "service": service}
+
+
+# ---------------------------------------------------------------------------
+# Enrichment Endpoints (Phase 9g-3)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/enrich/tracks")
+async def enrich_tracks(body: dict):
+    track_ids = body.get("track_ids", [])
+    source_id = body.get("source_id")
+    direct_tracks = body.get("tracks", [])
+    tracks_to_enrich = []
+    if direct_tracks:
+        tracks_to_enrich = [
+            {"artist": t["artist"], "title": t["title"]} for t in direct_tracks
+        ]
+    elif track_ids and source_id:
+        cache = _get_library_cache()
+        tracks_dict = cache._data.get(source_id, {}).get("tracks", {})
+        for tid in track_ids:
+            track = tracks_dict.get(tid)
+            if track:
+                tracks_to_enrich.append(
+                    {
+                        "artist": track.artist,
+                        "title": track.title,
+                        "library_source": track.source,
+                        "library_track_id": track.track_id,
+                    }
+                )
+    if not tracks_to_enrich:
+        raise HTTPException(400, "No tracks to enrich")
+    if len(tracks_to_enrich) <= 20:
+        result = await _enrichment_manager.enrich_batch(tracks_to_enrich)
+        return result
+    import asyncio
+
+    job_id = str(uuid.uuid4())[:8]
+    global _enrichment_job
+    _enrichment_job = {
+        "job_id": job_id,
+        "status": "running",
+        "total": len(tracks_to_enrich),
+        "completed": 0,
+        "errors": 0,
+        "current_track": None,
+    }
+
+    async def run_batch():
+        global _enrichment_job
+
+        def on_progress(**kwargs):
+            if _enrichment_job:
+                _enrichment_job.update(kwargs)
+
+        await _enrichment_manager.enrich_batch(tracks_to_enrich, on_progress=on_progress)
+        if _enrichment_job:
+            _enrichment_job["status"] = "done"
+
+    asyncio.create_task(run_batch())
+    return {"job_id": job_id}
+
+
+@app.get("/api/enrich/status")
+def enrich_status():
+    if _enrichment_job is None:
+        return {"status": "idle"}
+    return _enrichment_job
+
+
+@app.post("/api/enrich/all/{source_id}")
+async def enrich_all(source_id: str):
+    cache = _get_library_cache()
+    tracks_dict = cache._data.get(source_id, {}).get("tracks", {})
+    if not tracks_dict:
+        raise HTTPException(404, "Source not found or empty")
+    body = {"track_ids": list(tracks_dict.keys()), "source_id": source_id}
+    return await enrich_tracks(body)
+
+
+@app.post("/api/enrich/cancel")
+def enrich_cancel():
+    _enrichment_manager.cancel()
+    global _enrichment_job
+    if _enrichment_job:
+        _enrichment_job["status"] = "cancelled"
+    return {"status": "cancelled"}
+
+
+@app.get("/api/enrich/track/{track_id}")
+def enrich_track_get(track_id: int):
+    data = _enrichment_db.get_all_enrichment(track_id)
+    status = _enrichment_db.get_enrichment_status(track_id)
+    return {"track_id": track_id, "status": status, **data}
+
+
+@app.get("/api/enrich/stats")
+def enrich_stats():
+    return _enrichment_db.get_stats()
+
+
+# ---------------------------------------------------------------------------
+# Taste Endpoints (Phase 9g-3)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/taste/profile")
+def taste_profile_get():
+    return _taste_engine.get_profile().to_dict()
+
+
+@app.post("/api/taste/refresh")
+def taste_refresh():
+    cache = _get_library_cache()
+    all_tracks = []
+    for source in cache.list_sources():
+        tracks_dict = cache._data.get(source.id, {}).get("tracks", {})
+        all_tracks.extend(tracks_dict.values())
+    memory = _get_memory()
+    _taste_engine.refresh(all_tracks, memory.style_profile, memory.history)
+    profile = _taste_engine.get_profile()
+    return profile.to_dict()
+
+
+@app.get("/api/taste/suggestions")
+def taste_suggestions():
+    profile = _taste_engine.get_profile()
+    suggestions = []
+    for genre in profile.top_genres[:3]:
+        for mood in (profile.gen_moods or profile.mood_profile)[:2]:
+            lo, hi = profile.bpm_range
+            bpm = int((lo + hi) / 2) if lo > 0 else ""
+            parts = [genre.name, mood.name]
+            if bpm:
+                parts.append(f"{bpm} BPM")
+            if profile.key_preferences:
+                parts.append(profile.key_preferences[0].name)
+            suggestions.append(", ".join(parts))
+    return {"suggestions": suggestions[:6]}
+
+
+@app.put("/api/taste/overrides")
+def taste_overrides(body: dict):
+    text = body.get("text", "")
+    _taste_engine.set_overrides(text)
+    profile = _taste_engine.get_profile()
+    return profile.to_dict()
+
+
+# ---------------------------------------------------------------------------
 # Library AI Endpoints (Phase 9g-2)
 # ---------------------------------------------------------------------------
 
@@ -1379,7 +1590,19 @@ def generate_prompt_from_tracks(req: GeneratePromptRequest) -> dict:
             "available_count": 0,
         }
 
-    return generate_playlist_prompt(selected)
+    result = generate_playlist_prompt(selected)
+
+    # Blend taste profile into prompt
+    taste = _taste_engine.get_profile()
+    if taste.top_genres:
+        taste_genres = [g.name for g in taste.top_genres[:2]]
+        for tg in taste_genres:
+            if tg not in result["prompt"].lower():
+                result["prompt"] += f", {tg} influence"
+    if taste.overrides:
+        result["taste_overrides"] = taste.overrides
+
+    return result
 
 
 @app.post("/api/generate")
