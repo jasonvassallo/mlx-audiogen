@@ -7,6 +7,13 @@ const RETENTION_OPTIONS = [
   { label: "24 hours", value: 24 },
   { label: "7 days", value: 168 },
   { label: "30 days", value: 720 },
+  { label: "90 days", value: 2160 },
+  { label: "180 days", value: 4320 },
+  { label: "1 year", value: 8760 },
+  { label: "2 years", value: 17520 },
+  { label: "3 years", value: 26280 },
+  { label: "4 years", value: 35040 },
+  { label: "5 years", value: 43800 },
 ];
 
 export default function SettingsPanel() {

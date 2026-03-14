@@ -137,9 +137,10 @@ export default function App() {
             }
           />
 
-          <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-5">
-            {activeTab === "generate" && (
-              <>
+          {activeTab === "generate" && (
+            <div className="flex flex-1 flex-col overflow-hidden">
+              {/* Scrollable controls */}
+              <div className="flex-1 space-y-5 overflow-y-auto p-5 pb-3">
                 {modelsLoading && (
                   <div className="text-xs text-text-muted">Loading models...</div>
                 )}
@@ -153,25 +154,33 @@ export default function App() {
                 <PromptInput />
                 <EnhancePreview />
                 <ParameterPanel />
+              </div>
+
+              {/* Pinned at bottom: Generate + Queue */}
+              <div className="shrink-0 space-y-3 border-t border-border p-5 pt-4">
                 <GenerateButton />
                 <QueuePanel />
-              </>
-            )}
+              </div>
+            </div>
+          )}
 
-            {activeTab === "suggest" && <SuggestPanel />}
+          {activeTab === "suggest" && (
+            <div className="flex-1 overflow-y-auto p-5">
+              <SuggestPanel />
+            </div>
+          )}
 
-            {activeTab === "settings" && (
-              <>
-                <ServerPanel />
-                <div className="border-t border-border pt-4">
-                  <SettingsPanel />
-                </div>
-                <div className="border-t border-border pt-4">
-                  <LLMSettingsPanel />
-                </div>
-              </>
-            )}
-          </div>
+          {activeTab === "settings" && (
+            <div className="flex-1 space-y-5 overflow-y-auto p-5">
+              <ServerPanel />
+              <div className="border-t border-border pt-4">
+                <SettingsPanel />
+              </div>
+              <div className="border-t border-border pt-4">
+                <LLMSettingsPanel />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right panel: History / Output */}
