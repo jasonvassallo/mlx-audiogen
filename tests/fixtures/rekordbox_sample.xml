@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DJ_PLAYLISTS Version="1.0.0">
+  <PRODUCT Name="rekordbox" Version="6.7.0" Company="AlphaTheta"/>
+  <COLLECTION Entries="3">
+    <TRACK TrackID="1"
+           Name="Deep House Anthem"
+           Artist="Studio Artist"
+           Album="Club Sessions"
+           Genre="House"
+           Comments="8A key underground"
+           TotalTime="240"
+           AverageBpm="124.00"
+           Tonality="8A"
+           Year="2021"
+           Rating="204"
+           PlayCount="30"
+           Location="file://localhost/Users/testuser/Music/deep_house_anthem.wav"/>
+    <TRACK TrackID="2"
+           Name="Tech Minimal"
+           Artist="Tech Producer"
+           Album="Warehouse Cuts"
+           Genre="Techno"
+           Comments=""
+           TotalTime="360"
+           AverageBpm="138.00"
+           Tonality="2B"
+           Year="2020"
+           Rating="153"
+           PlayCount="8"
+           Location="file://localhost/Users/testuser/Music/tech_minimal.mp3"/>
+    <TRACK TrackID="3"
+           Name="SoundCloud Stream"
+           Artist="Remote Artist"
+           Album=""
+           Genre="Electronic"
+           Comments=""
+           TotalTime="180"
+           AverageBpm="130.00"
+           Tonality=""
+           Year="2023"
+           Rating="0"
+           PlayCount="0"
+           Location="file://localhostsoundcloud:tracks:123456789"/>
+  </COLLECTION>
+  <PLAYLISTS>
+    <NODE Type="0" Name="ROOT" Count="1">
+      <NODE Type="0" Name="DJ Sets" Count="1">
+        <NODE Type="1" Name="My Playlist" Count="2">
+          <TRACK Key="1"/>
+          <TRACK Key="2"/>
+        </NODE>
+      </NODE>
+      <NODE Type="1" Name="Empty" Count="0">
+      </NODE>
+    </NODE>
+  </PLAYLISTS>
+</DJ_PLAYLISTS>

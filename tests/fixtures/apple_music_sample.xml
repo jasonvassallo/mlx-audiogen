@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Major Version</key><integer>1</integer>
+	<key>Minor Version</key><integer>1</integer>
+	<key>Application Version</key><string>1.3.5.17</string>
+	<key>Music Folder</key><string>file:///Users/testuser/Music/Music/Media.localized/</string>
+	<key>Library Persistent ID</key><string>ABCD1234EFGH5678</string>
+	<key>Tracks</key>
+	<dict>
+		<key>101</key>
+		<dict>
+			<key>Track ID</key><integer>101</integer>
+			<key>Name</key><string>Sundown Groove</string>
+			<key>Artist</key><string>DJ Vassallo</string>
+			<key>Album</key><string>Sunset Sessions</string>
+			<key>Genre</key><string>Electronic</string>
+			<key>BPM</key><integer>128</integer>
+			<key>Year</key><integer>2023</integer>
+			<key>Total Time</key><integer>210000</integer>
+			<key>Play Count</key><integer>42</integer>
+			<key>Rating</key><integer>80</integer>
+			<key>Comments</key><string>4A - 128 BPM sunset vibes</string>
+			<key>Loved</key><true/>
+			<key>Location</key><string>file:///Users/testuser/Music/sundown_groove.wav</string>
+		</dict>
+		<key>102</key>
+		<dict>
+			<key>Track ID</key><integer>102</integer>
+			<key>Name</key><string>Morning Mist</string>
+			<key>Artist</key><string>Ambient Artist</string>
+			<key>Album</key><string>Dawn Collection</string>
+			<key>Genre</key><string>Ambient</string>
+			<key>BPM</key><integer>90</integer>
+			<key>Year</key><integer>2022</integer>
+			<key>Total Time</key><integer>360000</integer>
+			<key>Play Count</key><integer>15</integer>
+			<key>Rating</key><integer>100</integer>
+			<key>Comments</key><string>7B - 90 BPM gentle</string>
+			<key>Favorited</key><true/>
+			<key>Location</key><string>file://localhost/Users/testuser/Music/morning_mist.mp3</string>
+		</dict>
+		<key>103</key>
+		<dict>
+			<key>Track ID</key><integer>103</integer>
+			<key>Name</key><string>Sparse Track</string>
+			<key>Artist</key><string></string>
+			<key>Location</key><string>file:///Users/testuser/Music/sparse.wav</string>
+		</dict>
+	</dict>
+	<key>Playlists</key>
+	<array>
+		<dict>
+			<key>Name</key><string>Library</string>
+			<key>Playlist ID</key><integer>1</integer>
+			<key>Playlist Persistent ID</key><string>AAAA0001</string>
+			<key>All Items</key><true/>
+			<key>Playlist Items</key>
+			<array>
+				<dict><key>Track ID</key><integer>101</integer></dict>
+				<dict><key>Track ID</key><integer>102</integer></dict>
+				<dict><key>Track ID</key><integer>103</integer></dict>
+			</array>
+		</dict>
+		<dict>
+			<key>Name</key><string>DJ Vassallo</string>
+			<key>Playlist ID</key><integer>2</integer>
+			<key>Playlist Persistent ID</key><string>AAAA0002</string>
+			<key>Playlist Items</key>
+			<array>
+				<dict><key>Track ID</key><integer>101</integer></dict>
+				<dict><key>Track ID</key><integer>102</integer></dict>
+			</array>
+		</dict>
+		<dict>
+			<key>Name</key><string>Empty Playlist</string>
+			<key>Playlist ID</key><integer>3</integer>
+			<key>Playlist Persistent ID</key><string>AAAA0003</string>
+			<key>Playlist Items</key>
+			<array>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
