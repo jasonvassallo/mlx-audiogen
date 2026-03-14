@@ -73,6 +73,24 @@ def test_scan_dataset_skips_bad_jsonl():
         assert entries[0]["text"] == "good"
 
 
+def test_scan_dataset_recursive():
+    """Scan walks subdirectories to find audio files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = Path(tmpdir)
+        # Create nested structure: artist/album/track.wav
+        (p / "ArtistA" / "Album1").mkdir(parents=True)
+        (p / "ArtistB").mkdir()
+        _make_wav(p / "ArtistA" / "Album1" / "deep_groove.wav")
+        _make_wav(p / "ArtistB" / "chill_pad.wav")
+        _make_wav(p / "top_level.wav")
+        entries = scan_dataset(p)
+        assert len(entries) == 3
+        texts = {e["text"] for e in entries}
+        assert "deep groove" in texts
+        assert "chill pad" in texts
+        assert "top level" in texts
+
+
 def test_chunk_audio_short():
     """Audio shorter than chunk size is used whole."""
     audio = np.zeros(32000, dtype=np.float32)  # 1 second

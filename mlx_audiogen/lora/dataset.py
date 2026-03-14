@@ -36,11 +36,12 @@ def scan_dataset(data_dir: Path) -> list[dict[str, str]]:
     if not data_dir.is_dir():
         raise FileNotFoundError(f"Data directory not found: {data_dir}")
 
-    # Find all audio files
+    # Find all audio files (recursive — walks subdirectories)
     audio_files = sorted(
         f
-        for f in data_dir.iterdir()
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+        for ext in SUPPORTED_EXTENSIONS
+        for f in data_dir.rglob(f"*{ext}")
+        if f.is_file()
     )
 
     if not audio_files:
@@ -68,10 +69,14 @@ def scan_dataset(data_dir: Path) -> list[dict[str, str]]:
             metadata[entry["file"]] = entry["text"]
 
     # Build entries: metadata text or filename fallback
+    # Check both bare filename and relative path for metadata matches
     entries = []
     for audio_file in audio_files:
+        rel_path = str(audio_file.relative_to(data_dir))
         if audio_file.name in metadata:
             text = metadata[audio_file.name]
+        elif rel_path in metadata:
+            text = metadata[rel_path]
         else:
             # Filename fallback: replace _ and - with spaces, strip extension
             text = audio_file.stem.replace("_", " ").replace("-", " ")
