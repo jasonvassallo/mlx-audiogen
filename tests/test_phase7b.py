@@ -13,20 +13,38 @@ from fastapi.testclient import TestClient
 def test_tag_database_has_all_categories():
     from mlx_audiogen.shared.prompt_suggestions import TAG_DATABASE
 
+    assert len(TAG_DATABASE) == 14
     assert set(TAG_DATABASE.keys()) == {
         "genre",
+        "sub_genre",
         "mood",
         "instrument",
+        "vocal",
+        "key",
+        "bpm",
         "era",
         "production",
+        "artist",
+        "label",
+        "structure",
+        "rating",
+        "availability",
     }
 
 
 def test_tag_database_each_category_nonempty():
     from mlx_audiogen.shared.prompt_suggestions import TAG_DATABASE
 
+    # Original 5 categories have static entries; 9 new ones start empty
+    # (populated by library analysis at runtime)
+    static_categories = {"genre", "mood", "instrument", "era", "production"}
     for category, tags in TAG_DATABASE.items():
-        assert len(tags) >= 10, f"Category '{category}' has too few tags: {len(tags)}"
+        if category in static_categories:
+            assert len(tags) >= 10, (
+                f"Category '{category}' has too few tags: {len(tags)}"
+            )
+        else:
+            assert isinstance(tags, list), f"Category '{category}' must be a list"
 
 
 def test_tag_database_entries_are_strings():
@@ -270,14 +288,21 @@ def test_enhance_endpoint_template_fallback(client):
 
 
 def test_tags_endpoint(client):
-    """GET /api/tags returns all tag categories."""
+    """GET /api/tags returns all 14 tag categories."""
     resp = client.get("/api/tags")
     assert resp.status_code == 200
     data = resp.json()
-    assert set(data.keys()) == {"genre", "mood", "instrument", "era", "production"}
-    for tags in data.values():
-        assert isinstance(tags, list)
-        assert len(tags) > 0
+    assert len(data) == 14
+    # Original 5 categories have static entries
+    for cat in ("genre", "mood", "instrument", "era", "production"):
+        assert cat in data
+        assert isinstance(data[cat], list)
+        assert len(data[cat]) > 0
+    # 9 new categories start as empty lists
+    for cat in ("sub_genre", "vocal", "key", "bpm", "artist", "label",
+                "structure", "rating", "availability"):
+        assert cat in data
+        assert isinstance(data[cat], list)
 
 
 def test_llm_models_endpoint(client):

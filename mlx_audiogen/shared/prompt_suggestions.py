@@ -168,14 +168,25 @@ ERAS = [
 ]
 
 # Unified tag database for autocomplete (all categories)
+# Original 5 categories have static entries; 9 new categories are populated
+# dynamically by library analysis (Phase 9g-2).
 TAG_DATABASE: dict[str, list[str]] = {
     "genre": list(GENRES),
+    "sub_genre": [],  # populated by library analysis
     "mood": list(MOODS),
     "instrument": [
         inst for instruments in INSTRUMENTS.values() for inst in instruments
     ],
+    "vocal": [],  # populated by library analysis
+    "key": [],  # populated by library analysis
+    "bpm": [],  # populated by library analysis
     "era": list(ERAS),
     "production": list(PRODUCTION),
+    "artist": [],  # populated by library analysis
+    "label": [],  # populated by library analysis
+    "structure": [],  # populated by library analysis
+    "rating": [],  # not used as tags, displayed as stars
+    "availability": [],  # not used as tags, displayed as dots
 }
 
 

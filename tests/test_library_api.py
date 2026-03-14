@@ -21,17 +21,13 @@ FIXTURES = Path(__file__).parent / "fixtures"
 @pytest.fixture(autouse=True)
 def _clean_library_state(tmp_path, monkeypatch):
     """Reset library cache and collections between tests."""
-    import importlib
-    import sys
+    # Get server module (can't use 'import ... as' because 'app' attribute shadows it)
+    import sys  # noqa: E402
 
-    import mlx_audiogen.library.collections
-    import mlx_audiogen.server.app
-
+    import mlx_audiogen.library.collections as col_mod
     from mlx_audiogen.library.cache import LibraryCache
 
-    # Get actual module references via sys.modules
     srv_mod = sys.modules["mlx_audiogen.server.app"]
-    col_mod = sys.modules["mlx_audiogen.library.collections"]
 
     # Create a fresh cache with isolated config dir per test
     test_cache = LibraryCache(config_dir=tmp_path / "config")
@@ -196,9 +192,7 @@ class TestLibraryBrowsing:
         return source_id
 
     def test_scan_apple_music(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         # Verify track count
         res = client.get(f"/api/library/tracks/{source_id}")
         assert res.status_code == 200
@@ -206,9 +200,7 @@ class TestLibraryBrowsing:
         assert data["count"] == 3
 
     def test_scan_rekordbox(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "rekordbox", "rekordbox_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "rekordbox", "rekordbox_sample.xml")
         res = client.get(f"/api/library/tracks/{source_id}")
         assert res.status_code == 200
         assert res.json()["count"] == 3
@@ -218,9 +210,7 @@ class TestLibraryBrowsing:
         assert res.status_code == 404
 
     def test_playlists(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         res = client.get(f"/api/library/playlists/{source_id}")
         assert res.status_code == 200
         playlists = res.json()
@@ -229,36 +219,24 @@ class TestLibraryBrowsing:
         assert "DJ Vassallo" in names
 
     def test_playlist_tracks(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         # Get playlist ID for "DJ Vassallo"
         playlists_res = client.get(f"/api/library/playlists/{source_id}")
-        dj_pl = next(
-            p for p in playlists_res.json() if p["name"] == "DJ Vassallo"
-        )
-        res = client.get(
-            f"/api/library/playlist-tracks/{source_id}/{dj_pl['id']}"
-        )
+        dj_pl = next(p for p in playlists_res.json() if p["name"] == "DJ Vassallo")
+        res = client.get(f"/api/library/playlist-tracks/{source_id}/{dj_pl['id']}")
         assert res.status_code == 200
         assert res.json()["count"] == 2
 
     def test_search_tracks_text(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
-        res = client.get(
-            f"/api/library/tracks/{source_id}", params={"q": "Sundown"}
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
+        res = client.get(f"/api/library/tracks/{source_id}", params={"q": "Sundown"})
         assert res.status_code == 200
         tracks = res.json()["tracks"]
         assert len(tracks) >= 1
         assert tracks[0]["title"] == "Sundown Groove"
 
     def test_search_tracks_bpm_range(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         res = client.get(
             f"/api/library/tracks/{source_id}",
             params={"bpm_min": 85, "bpm_max": 95},
@@ -269,9 +247,7 @@ class TestLibraryBrowsing:
         assert tracks[0]["title"] == "Morning Mist"
 
     def test_sort_tracks(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         res = client.get(
             f"/api/library/tracks/{source_id}",
             params={"sort": "bpm", "order": "desc"},
@@ -283,9 +259,7 @@ class TestLibraryBrowsing:
             assert with_bpm[0]["bpm"] >= with_bpm[1]["bpm"]
 
     def test_pagination(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         res = client.get(
             f"/api/library/tracks/{source_id}",
             params={"offset": 0, "limit": 1},
@@ -419,10 +393,12 @@ class TestCollections:
         assert res.status_code == 404
 
     def test_import_collection(self, client: TestClient):
-        collection_data = json.dumps({
-            "name": "imported",
-            "tracks": [{"track_id": "42", "title": "Imported Track"}],
-        })
+        collection_data = json.dumps(
+            {
+                "name": "imported",
+                "tracks": [{"track_id": "42", "title": "Imported Track"}],
+            }
+        )
         res = client.post(
             "/api/collections/import",
             files={"file": ("imported.json", collection_data, "application/json")},
@@ -477,9 +453,7 @@ class TestLibraryAI:
         return source_id
 
     def test_describe_template(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         res = client.post(
             "/api/library/describe",
             json={
@@ -498,9 +472,7 @@ class TestLibraryAI:
         assert "128" in desc101
 
     def test_describe_missing_tracks(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         res = client.post(
             "/api/library/describe",
             json={
@@ -513,9 +485,7 @@ class TestLibraryAI:
         assert len(res.json()["descriptions"]) == 0
 
     def test_suggest_name(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         res = client.post(
             "/api/library/suggest-name",
             json={
@@ -531,9 +501,7 @@ class TestLibraryAI:
         assert len(data["name"]) <= 64
 
     def test_suggest_name_no_tracks(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         res = client.post(
             "/api/library/suggest-name",
             json={
@@ -545,9 +513,7 @@ class TestLibraryAI:
         assert res.json()["name"] == "my-style"
 
     def test_generate_prompt(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         res = client.post(
             "/api/library/generate-prompt",
             json={
@@ -564,9 +530,7 @@ class TestLibraryAI:
         assert len(data["prompt"]) > 0
 
     def test_generate_prompt_no_tracks(self, client: TestClient):
-        source_id = self._add_and_scan(
-            client, "apple_music", "apple_music_sample.xml"
-        )
+        source_id = self._add_and_scan(client, "apple_music", "apple_music_sample.xml")
         res = client.post(
             "/api/library/generate-prompt",
             json={

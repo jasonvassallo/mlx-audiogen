@@ -7,10 +7,19 @@ const CATEGORY_COLORS: Record<
   { bg: string; text: string; label: string }
 > = {
   genre: { bg: "bg-warning/20", text: "text-warning", label: "genre" },
+  sub_genre: { bg: "bg-orange-500/20", text: "text-orange-400", label: "sub-genre" },
   mood: { bg: "bg-success/20", text: "text-success", label: "mood" },
   instrument: { bg: "bg-info/20", text: "text-info", label: "instrument" },
+  vocal: { bg: "bg-teal-500/20", text: "text-teal-400", label: "vocal" },
+  key: { bg: "bg-cyan-500/20", text: "text-cyan-400", label: "key" },
+  bpm: { bg: "bg-blue-500/20", text: "text-blue-400", label: "bpm" },
   era: { bg: "bg-purple-500/20", text: "text-purple-400", label: "era" },
   production: { bg: "bg-rose-500/20", text: "text-rose-400", label: "production" },
+  artist: { bg: "bg-indigo-500/20", text: "text-indigo-400", label: "artist" },
+  label: { bg: "bg-fuchsia-500/20", text: "text-fuchsia-400", label: "label" },
+  structure: { bg: "bg-lime-500/20", text: "text-lime-400", label: "structure" },
+  rating: { bg: "bg-yellow-500/20", text: "text-yellow-400", label: "rating" },
+  availability: { bg: "bg-gray-500/20", text: "text-gray-400", label: "available" },
 };
 
 const MAX_RESULTS = 8;
