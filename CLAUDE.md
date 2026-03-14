@@ -39,7 +39,7 @@ uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lo
 uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lora-path /path/to/lora/
 
 # Run tests
-uv run pytest                                     # unit tests only (350 tests, ~12s)
+uv run pytest                                     # unit tests only (402 tests, ~12s)
 uv run pytest tests/test_specific.py::test_name   # single test
 uv run pytest -m integration -v                   # integration tests (real weights + GPU, ~30s)
 uv run pytest -m "not integration"                # explicit: unit tests only
@@ -213,7 +213,7 @@ m4l/
 | `POST` | `/api/presets/{name}` | Save a preset to the shared directory |
 | `GET` | `/api/presets/{name}` | Load a preset by name |
 | `POST` | `/api/enhance` | Enhance prompt via LLM or template fallback |
-| `GET` | `/api/tags` | Tag database for autocomplete (genre/mood/instrument/era/production) |
+| `GET` | `/api/tags` | Tag database for autocomplete (14 categories: genre, sub_genre, mood, instrument, vocal, key, bpm, era, production, artist, label, structure, rating, availability) |
 | `GET` | `/api/llm/models` | List discovered local LLM models |
 | `POST` | `/api/llm/select` | Select and load an LLM model |
 | `GET` | `/api/llm/status` | LLM status (loaded, memory, idle time) |
@@ -226,9 +226,27 @@ m4l/
 | `GET` | `/api/loras` | List available LoRA adapters |
 | `GET` | `/api/loras/{name}` | Get LoRA adapter config |
 | `DELETE` | `/api/loras/{name}` | Delete a LoRA adapter |
-| `POST` | `/api/train` | Start LoRA training (returns job ID) |
+| `POST` | `/api/train` | Start LoRA training (returns job ID). Supports `collection` field as alternative to `data_dir` |
 | `GET` | `/api/train/status/{id}` | Poll training progress |
 | `POST` | `/api/train/stop/{id}` | Stop active training |
+| `GET` | `/api/library/sources` | List configured library sources |
+| `POST` | `/api/library/sources` | Add a library source (Apple Music or rekordbox XML) |
+| `PUT` | `/api/library/sources/{id}` | Update source path/label |
+| `DELETE` | `/api/library/sources/{id}` | Remove a source |
+| `POST` | `/api/library/scan/{id}` | Parse/refresh library XML |
+| `GET` | `/api/library/playlists/{id}` | List playlists for a source |
+| `GET` | `/api/library/tracks/{id}` | Search/filter/sort/paginate tracks (query params: q, artist, album, genre, key, bpm_min/max, year_min/max, rating_min, loved, available, sort, order, offset, limit) |
+| `GET` | `/api/library/playlist-tracks/{sid}/{pid}` | Get tracks in a playlist |
+| `POST` | `/api/library/describe` | Generate descriptions from track metadata (template/LLM mode) |
+| `POST` | `/api/library/suggest-name` | Suggest LoRA adapter name from tracks |
+| `POST` | `/api/library/generate-prompt` | Playlist analysis + prompt generation |
+| `GET` | `/api/collections` | List saved collections |
+| `POST` | `/api/collections` | Create a new collection |
+| `GET` | `/api/collections/{name}` | Get collection details |
+| `PUT` | `/api/collections/{name}` | Update collection |
+| `DELETE` | `/api/collections/{name}` | Delete collection |
+| `GET` | `/api/collections/{name}/export` | Export as JSON download |
+| `POST` | `/api/collections/import` | Import from JSON upload |
 
 Interactive API docs at `http://localhost:8420/docs` when running.
 
