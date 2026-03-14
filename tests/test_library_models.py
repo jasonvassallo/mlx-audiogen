@@ -1,6 +1,5 @@
 """Tests for mlx_audiogen.library.models."""
 
-
 from mlx_audiogen.library.models import (
     LibrarySource,
     PlaylistInfo,

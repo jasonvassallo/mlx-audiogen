@@ -39,7 +39,7 @@ uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lo
 uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lora-path /path/to/lora/
 
 # Run tests
-uv run pytest                                     # unit tests only (184 tests, ~12s)
+uv run pytest                                     # unit tests only (350 tests, ~12s)
 uv run pytest tests/test_specific.py::test_name   # single test
 uv run pytest -m integration -v                   # integration tests (real weights + GPU, ~30s)
 uv run pytest -m "not integration"                # explicit: unit tests only
@@ -126,6 +126,13 @@ mlx_audiogen/
 │   ├── inject.py     # LoRALinear class, apply_lora/remove_lora model surgery
 │   ├── dataset.py    # Audio scanning, chunking, delay pattern for training
 │   └── trainer.py    # Training loop with masked loss, early stopping, save/load
+├── library/          # Music library scanner (Phase 9g-2, in progress)
+│   ├── models.py     # TrackInfo, PlaylistInfo, LibrarySource dataclasses
+│   ├── parsers.py    # Apple Music (plistlib) + rekordbox (defusedxml) XML parsers
+│   ├── cloud_paths.py # file:// URL resolution + iCloud placeholder detection
+│   ├── description_gen.py # Metadata → text description (template + LLM modes)
+│   ├── collections.py # Training collection CRUD + collection_to_training_data bridge
+│   └── cache.py      # In-memory LibraryCache with search/sort/filter/paginate
 ├── server/
 │   └── app.py        # FastAPI HTTP server with LRU pipeline cache + async jobs + static SPA serving
 ├── cli/
