@@ -39,10 +39,10 @@ uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lo
 uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lora-path /path/to/lora/
 
 # Run tests
-uv run pytest                                     # unit tests only (402 tests, ~12s)
+uv run pytest                                     # all tests (404 tests, ~12s)
 uv run pytest tests/test_specific.py::test_name   # single test
-uv run pytest -m integration -v                   # integration tests (real weights + GPU, ~30s)
-uv run pytest -m "not integration"                # explicit: unit tests only
+uv run pytest -m integration -v                   # integration tests only (real weights/XML, ~30s)
+uv run pytest -m "not integration"                # unit tests only (390 tests)
 
 # Run end-to-end demo (generates audio + separates stems → output/demucs_e2e_demo/)
 uv run python scripts/demucs_e2e_demo.py
