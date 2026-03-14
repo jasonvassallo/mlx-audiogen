@@ -1,6 +1,7 @@
 import { useStore } from "../store/useStore";
 import ParamSlider from "./ParamSlider";
 import DurationControl from "./DurationControl";
+import LoRASelector from "./LoRASelector";
 
 export default function ParameterPanel() {
   const params = useStore((s) => s.params);
@@ -81,6 +82,9 @@ export default function ParameterPanel() {
           <option value="both">Audio + MIDI</option>
         </select>
       </div>
+
+      {/* LoRA selector (MusicGen only) */}
+      {params.model === "musicgen" && <LoRASelector />}
 
       <div className="border-t border-border pt-3">
         {params.model === "musicgen" ? (

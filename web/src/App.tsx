@@ -15,10 +15,12 @@ import TransportBar from "./components/TransportBar";
 import TabBar from "./components/TabBar";
 import SuggestPanel from "./components/SuggestPanel";
 import QueuePanel from "./components/QueuePanel";
+import TrainPanel from "./components/TrainPanel";
 
 const TABS = [
   { id: "generate", label: "Generate" },
   { id: "suggest", label: "Suggest" },
+  { id: "train", label: "Train" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -63,6 +65,11 @@ export default function App() {
           return;
         }
         if (e.key === "3") {
+          e.preventDefault();
+          setActiveTab("train");
+          return;
+        }
+        if (e.key === "4") {
           e.preventDefault();
           setActiveTab("settings");
           return;
@@ -133,7 +140,7 @@ export default function App() {
             active={activeTab}
             tabs={TABS}
             onChange={(id) =>
-              setActiveTab(id as "generate" | "suggest" | "settings")
+              setActiveTab(id as "generate" | "suggest" | "train" | "settings")
             }
           />
 
@@ -167,6 +174,12 @@ export default function App() {
           {activeTab === "suggest" && (
             <div className="flex-1 overflow-y-auto p-5">
               <SuggestPanel />
+            </div>
+          )}
+
+          {activeTab === "train" && (
+            <div className="flex-1 overflow-y-auto p-5">
+              <TrainPanel />
             </div>
           )}
 

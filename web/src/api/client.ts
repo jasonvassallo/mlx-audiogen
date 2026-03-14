@@ -5,6 +5,7 @@ import type {
   JobInfo,
   LLMModelInfo,
   LLMStatus,
+  LoRAInfo,
   ModelInfo,
   PresetInfo,
   PromptAnalysis,
@@ -12,6 +13,8 @@ import type {
   ServerSettings,
   StemResult,
   TagDatabase,
+  TrainRequest,
+  TrainStatus,
 } from "../types/api";
 
 /**
@@ -223,5 +226,44 @@ export function updateServerSettings(
   return request<ServerSettings>("/settings", {
     method: "POST",
     body: JSON.stringify(settings),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9g: LoRA Fine-Tuning
+// ---------------------------------------------------------------------------
+
+/** List available LoRA adapters. */
+export function fetchLoras(): Promise<LoRAInfo[]> {
+  return request<LoRAInfo[]>("/loras");
+}
+
+/** Delete a LoRA adapter. */
+export function deleteLora(name: string): Promise<{ deleted: string }> {
+  return request<{ deleted: string }>(
+    `/loras/${encodeURIComponent(name)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** Start LoRA training. */
+export function startTraining(
+  req: TrainRequest,
+): Promise<{ id: string }> {
+  return request<{ id: string }>("/train", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Get training status. */
+export function fetchTrainStatus(id: string): Promise<TrainStatus> {
+  return request<TrainStatus>(`/train/status/${id}`);
+}
+
+/** Stop an active training job. */
+export function stopTraining(id: string): Promise<{ stopped: string }> {
+  return request<{ stopped: string }>(`/train/stop/${id}`, {
+    method: "POST",
   });
 }

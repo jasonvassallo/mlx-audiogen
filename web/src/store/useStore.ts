@@ -5,6 +5,7 @@ import type {
   JobInfo,
   LLMModelInfo,
   LLMStatus,
+  LoRAInfo,
   ModelInfo,
   PresetInfo,
   PromptAnalysis,
@@ -34,6 +35,7 @@ import {
   updateServerSettings as apiUpdateServerSettings,
   getServerUrl,
   setServerUrl as apiSetServerUrl,
+  fetchLoras as apiFetchLoras,
 } from "../api/client";
 import {
   saveEntry,
@@ -95,8 +97,8 @@ interface AppState {
   updateSettings: (settings: Partial<HistorySettings>) => Promise<void>;
 
   // --- Active Tab ---
-  activeTab: "generate" | "suggest" | "settings";
-  setActiveTab: (tab: "generate" | "suggest" | "settings") => void;
+  activeTab: "generate" | "suggest" | "train" | "settings";
+  setActiveTab: (tab: "generate" | "suggest" | "train" | "settings") => void;
 
   // --- Enhance Flow ---
   enhanceResult: EnhanceResponse | null;
@@ -159,6 +161,12 @@ interface AppState {
   removeFromQueue: (index: number) => void;
   clearQueue: () => void;
   runQueue: () => Promise<void>;
+
+  // --- LoRA (Phase 9g) ---
+  loras: LoRAInfo[];
+  selectedLora: string | null;
+  fetchLoras: () => Promise<void>;
+  setSelectedLora: (name: string | null) => void;
 }
 
 const DEFAULT_PARAMS: GenerateRequest = {
@@ -225,7 +233,7 @@ export const useStore = create<AppState>((set, get) => ({
   isGenerating: false,
   generateError: null,
   generate: async () => {
-    const { params, isGenerating } = get();
+    const { params, isGenerating, selectedLora } = get();
     if (isGenerating) return;
     if (!params.prompt.trim()) {
       set({ generateError: "Prompt is required" });
@@ -235,7 +243,8 @@ export const useStore = create<AppState>((set, get) => ({
     set({ isGenerating: true, generateError: null, activeJob: null });
 
     try {
-      const { id } = await submitGeneration(params);
+      const reqParams = { ...params, lora: selectedLora };
+      const { id } = await submitGeneration(reqParams);
 
       // Poll until done
       const poll = async (): Promise<JobInfo> => {
@@ -656,4 +665,17 @@ export const useStore = create<AppState>((set, get) => ({
 
     set({ queueRunning: false, queueProgress: null, queue: [], activeJob: null });
   },
+
+  // --- LoRA (Phase 9g) ---
+  loras: [],
+  selectedLora: null,
+  fetchLoras: async () => {
+    try {
+      const loras = await apiFetchLoras();
+      set({ loras });
+    } catch {
+      set({ loras: [] });
+    }
+  },
+  setSelectedLora: (name) => set({ selectedLora: name }),
 }));

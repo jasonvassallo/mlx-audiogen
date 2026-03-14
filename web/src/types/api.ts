@@ -26,6 +26,8 @@ export interface GenerateRequest {
   // Audio-to-audio (Stable Audio only)
   reference_audio_path?: string | null;
   reference_strength?: number;
+  // LoRA adapter (MusicGen only)
+  lora?: string | null;
 }
 
 /** Prompt analysis result from /api/suggest. */
@@ -141,4 +143,50 @@ export interface PromptMemoryData {
     preferred_duration: number;
     generation_count: number;
   };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9g: LoRA Fine-Tuning
+// ---------------------------------------------------------------------------
+
+/** LoRA adapter info from GET /api/loras. */
+export interface LoRAInfo {
+  name: string;
+  base_model: string;
+  profile: string | null;
+  rank: number;
+  alpha: number;
+  hidden_size: number;
+  final_loss: number | null;
+  best_loss: number | null;
+  training_samples: number | null;
+  created_at: string | null;
+}
+
+/** LoRA training request for POST /api/train. */
+export interface TrainRequest {
+  data_dir: string;
+  base_model: string;
+  name: string;
+  profile?: string;
+  rank?: number;
+  alpha?: number;
+  targets?: string[];
+  epochs?: number;
+  learning_rate?: number;
+  batch_size?: number;
+  chunk_seconds?: number;
+  early_stop?: boolean;
+  patience?: number;
+}
+
+/** Training status from GET /api/train/status/{id}. */
+export interface TrainStatus {
+  epoch: number;
+  total_epochs: number;
+  step: number;
+  steps_per_epoch: number;
+  loss: number;
+  best_loss: number | null;
+  progress: number;
 }
