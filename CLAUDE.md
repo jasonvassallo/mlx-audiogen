@@ -39,7 +39,7 @@ uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lo
 uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lora-path /path/to/lora/
 
 # Run tests
-uv run pytest                                     # all tests (404 tests, ~12s)
+uv run pytest                                     # all tests (469 tests, ~14s)
 uv run pytest tests/test_specific.py::test_name   # single test
 uv run pytest -m integration -v                   # integration tests only (real weights/XML, ~30s)
 uv run pytest -m "not integration"                # unit tests only (390 tests)
@@ -132,7 +132,20 @@ mlx_audiogen/
 │   ├── cloud_paths.py # file:// URL resolution + iCloud placeholder detection
 │   ├── description_gen.py # Metadata → text description (template + LLM modes)
 │   ├── collections.py # Training collection CRUD + collection_to_training_data bridge
-│   └── cache.py      # In-memory LibraryCache with search/sort/filter/paginate
+│   ├── cache.py      # In-memory LibraryCache with search/sort/filter/paginate
+│   ├── enrichment/   # Web enrichment (Phase 9g-3)
+│   │   ├── enrichment_db.py  # SQLite cache (~/.mlx-audiogen/enrichment.db)
+│   │   ├── rate_limiter.py   # Per-API async token bucket (MB:1/s, LFM:5/s, DC:1/s)
+│   │   ├── clients.py        # httpx async client factory
+│   │   ├── musicbrainz.py    # MusicBrainz recording search + tag extraction
+│   │   ├── lastfm.py         # Last.fm track info + crowd tags
+│   │   ├── discogs.py        # Discogs release search + style taxonomy
+│   │   └── manager.py        # Orchestrator: cache check → fetch → merge → store
+│   └── taste/        # Taste learning engine (Phase 9g-3)
+│       ├── profile.py        # TasteProfile + WeightedTag dataclasses
+│       ├── signals.py        # Library + generation signal collectors
+│       └── engine.py         # TasteEngine: compute, persist, query profiles
+├── credentials.py    # macOS Keychain credential manager (keyring + env var fallback)
 ├── server/
 │   └── app.py        # FastAPI HTTP server with LRU pipeline cache + async jobs + static SPA serving
 ├── cli/
@@ -249,6 +262,19 @@ m4l/
 | `DELETE` | `/api/collections/{name}` | Delete collection |
 | `GET` | `/api/collections/{name}/export` | Export as JSON download |
 | `POST` | `/api/collections/import` | Import from JSON upload |
+| `GET` | `/api/credentials/status` | Which services have API keys configured (no values exposed) |
+| `POST` | `/api/credentials/{service}` | Store API key in macOS Keychain |
+| `DELETE` | `/api/credentials/{service}` | Remove API key from Keychain |
+| `POST` | `/api/enrich/tracks` | Enrich batch of tracks (body: track IDs or artist/title pairs) |
+| `GET` | `/api/enrich/status` | Current enrichment job progress |
+| `POST` | `/api/enrich/all/{source_id}` | Enrich all tracks in a library source (background) |
+| `POST` | `/api/enrich/cancel` | Cancel running enrichment job |
+| `GET` | `/api/enrich/track/{track_id}` | Get enrichment data for a single track |
+| `GET` | `/api/enrich/stats` | Enrichment cache statistics |
+| `GET` | `/api/taste/profile` | Current taste profile |
+| `POST` | `/api/taste/refresh` | Recompute taste profile from all signals |
+| `GET` | `/api/taste/suggestions` | Personalized prompt suggestions |
+| `PUT` | `/api/taste/overrides` | Manual taste preference overrides |
 
 Interactive API docs at `http://localhost:8420/docs` when running.
 
