@@ -44,6 +44,45 @@ def _clean_library_state(tmp_path, monkeypatch):
     _rate_limiter._generate_hits.clear()
     _rate_limiter._general_hits.clear()
 
+    # Patch enrichment / credential / taste singletons for isolation
+    from mlx_audiogen.library.enrichment.enrichment_db import EnrichmentDB
+    from mlx_audiogen.library.enrichment.manager import EnrichmentManager
+    from mlx_audiogen.library.taste.engine import TasteEngine
+
+    test_enrichment_db = EnrichmentDB(":memory:")
+    monkeypatch.setattr(srv_mod, "_enrichment_db", test_enrichment_db)
+    monkeypatch.setattr(
+        srv_mod,
+        "_enrichment_manager",
+        EnrichmentManager(db=test_enrichment_db, credentials=None),
+    )
+    monkeypatch.setattr(
+        srv_mod, "_taste_engine", TasteEngine(profile_path=str(tmp_path / "taste.json"))
+    )
+    monkeypatch.setattr(srv_mod, "_enrichment_job", None)
+
+    # Patch credential manager with a fake that doesn't hit the keychain
+    class _FakeCredentialManager:
+        def status(self):
+            return {"musicbrainz": True, "lastfm": False, "discogs": False}
+
+        def set(self, service, value):
+            from mlx_audiogen.credentials import _SERVICES
+
+            if service not in _SERVICES:
+                raise ValueError(f"Unknown service: {service!r}")
+
+        def delete(self, service):
+            from mlx_audiogen.credentials import _SERVICES
+
+            if service not in _SERVICES:
+                raise ValueError(f"Unknown service: {service!r}")
+
+        def get(self, service):
+            return None
+
+    monkeypatch.setattr(srv_mod, "_credential_manager", _FakeCredentialManager())
+
 
 @pytest.fixture
 def client():
@@ -541,3 +580,95 @@ class TestLibraryAI:
         assert res.status_code == 200
         assert res.json()["track_count"] == 0
         assert res.json()["prompt"] == "instrumental music"
+
+
+# ---------------------------------------------------------------------------
+# Credential Endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialEndpoints:
+    def test_status(self, client: TestClient):
+        res = client.get("/api/credentials/status")
+        assert res.status_code == 200
+        assert res.json()["musicbrainz"] is True
+
+    def test_set_invalid_service(self, client: TestClient):
+        res = client.post("/api/credentials/spotify_key", json={"api_key": "v"})
+        assert res.status_code == 400
+
+    def test_set_missing_api_key(self, client: TestClient):
+        res = client.post("/api/credentials/lastfm_api_key", json={})
+        assert res.status_code == 400
+
+    def test_set_valid_service(self, client: TestClient):
+        res = client.post("/api/credentials/lastfm_api_key", json={"api_key": "test123"})
+        assert res.status_code == 200
+        assert res.json()["status"] == "saved"
+
+    def test_delete_invalid_service(self, client: TestClient):
+        res = client.delete("/api/credentials/spotify_key")
+        assert res.status_code == 400
+
+    def test_delete_valid_service(self, client: TestClient):
+        res = client.delete("/api/credentials/lastfm_api_key")
+        assert res.status_code == 200
+        assert res.json()["status"] == "deleted"
+
+
+# ---------------------------------------------------------------------------
+# Enrichment Endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichmentEndpoints:
+    def test_status_idle(self, client: TestClient):
+        res = client.get("/api/enrich/status")
+        assert res.status_code == 200
+        assert res.json()["status"] == "idle"
+
+    def test_stats_empty(self, client: TestClient):
+        res = client.get("/api/enrich/stats")
+        assert res.status_code == 200
+        assert res.json()["total_tracks"] == 0
+
+    def test_enrich_empty_body(self, client: TestClient):
+        res = client.post("/api/enrich/tracks", json={})
+        assert res.status_code == 400
+
+    def test_cancel(self, client: TestClient):
+        res = client.post("/api/enrich/cancel")
+        assert res.status_code == 200
+        assert res.json()["status"] == "cancelled"
+
+    def test_track_get_nonexistent(self, client: TestClient):
+        res = client.get("/api/enrich/track/99999")
+        assert res.status_code == 200
+        assert res.json()["status"] == "none"
+
+
+# ---------------------------------------------------------------------------
+# Taste Endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestTasteEndpoints:
+    def test_empty_profile(self, client: TestClient):
+        res = client.get("/api/taste/profile")
+        assert res.status_code == 200
+        assert res.json()["library_track_count"] == 0
+
+    def test_set_overrides(self, client: TestClient):
+        res = client.put("/api/taste/overrides", json={"text": "more minimal"})
+        assert res.status_code == 200
+        assert res.json()["overrides"] == "more minimal"
+
+    def test_suggestions_empty(self, client: TestClient):
+        res = client.get("/api/taste/suggestions")
+        assert res.status_code == 200
+        assert "suggestions" in res.json()
+
+    def test_refresh(self, client: TestClient):
+        res = client.post("/api/taste/refresh")
+        assert res.status_code == 200
+        assert "library_track_count" in res.json()
