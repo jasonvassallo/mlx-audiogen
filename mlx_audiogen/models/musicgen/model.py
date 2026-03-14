@@ -119,6 +119,7 @@ class MusicGenModel(nn.Module):
         conditioning: mx.array,
         cache: Optional[list[KVCache]] = None,
         cross_kv_caches: Optional[list[CrossAttentionKVCache]] = None,
+        mask: Optional[mx.array] = None,
     ) -> mx.array:
         """Forward pass: tokens -> embeddings -> transformer -> logits.
 
@@ -129,6 +130,7 @@ class MusicGenModel(nn.Module):
             cross_kv_caches: List of CrossAttentionKVCache objects (one per layer).
                 On step 0, K/V are computed from conditioning and cached.
                 On subsequent steps, cached K/V are reused (conditioning is static).
+            mask: Optional causal mask for self-attention (used during training).
 
         Returns:
             Logits of shape (B, seq_len, codebook_size, num_codebooks).
@@ -154,7 +156,7 @@ class MusicGenModel(nn.Module):
 
         # Run through transformer layers
         for layer, c, xc in zip(self.layers, cache, cross_kv_caches):  # type: ignore[arg-type]
-            x = layer(x, conditioning, cache=c, cross_kv_cache=xc)
+            x = layer(x, conditioning, mask=mask, cache=c, cross_kv_cache=xc)
 
         # Final norm + per-codebook logits
         x = self.layer_norm(x)
