@@ -288,3 +288,116 @@ class TestDiscogs:
         from mlx_audiogen.library.enrichment.discogs import _parse_discogs_search_response
 
         assert _parse_discogs_search_response({"results": []}) is None
+
+
+# ===========================================================================
+# EnrichmentManager tests (2 tests)
+# ===========================================================================
+
+from unittest.mock import AsyncMock, patch
+
+from mlx_audiogen.library.enrichment.manager import EnrichmentManager
+
+
+@pytest.fixture
+def manager():
+    db = EnrichmentDB(":memory:")
+    m = EnrichmentManager.__new__(EnrichmentManager)
+    m._db = db
+    m._cred = None
+    m._mb_limiter = ApiRateLimiter(max_per_second=100)
+    m._lfm_limiter = ApiRateLimiter(max_per_second=100)
+    m._dc_limiter = ApiRateLimiter(max_per_second=100)
+    m._cancelled = False
+    return m
+
+
+class TestEnrichmentManager:
+    def test_enrich_musicbrainz_only(self, manager):
+        """MusicBrainz is fetched without credentials; Last.fm/Discogs skipped."""
+        mb_result = {"tags": [{"name": "house"}], "genres": ["house"], "artist_mbid": "abc"}
+
+        async def run():
+            with patch(
+                "mlx_audiogen.library.enrichment.manager.search_musicbrainz",
+                new=AsyncMock(return_value=mb_result),
+            ):
+                return await manager.enrich_single("Solomun", "Midnight Express")
+
+        result = asyncio.run(run())
+        assert result["musicbrainz"] is not None
+        assert result["lastfm"] is None
+
+    def test_cached_no_refetch(self, manager):
+        """Second call for same track reuses cached data, no API call."""
+        call_count = 0
+
+        async def fake_mb(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            return {"tags": [], "genres": [], "artist_mbid": "x"}
+
+        async def run():
+            with patch(
+                "mlx_audiogen.library.enrichment.manager.search_musicbrainz",
+                new=AsyncMock(side_effect=fake_mb),
+            ):
+                await manager.enrich_single("A", "B")
+                await manager.enrich_single("A", "B")
+
+        asyncio.run(run())
+        assert call_count == 1
+
+    def test_enrich_batch_progress(self, manager):
+        """enrich_batch calls on_progress for each track and returns summary."""
+        mb_result = {"tags": [], "genres": [], "artist_mbid": "x"}
+        progress_calls = []
+
+        async def run():
+            with patch(
+                "mlx_audiogen.library.enrichment.manager.search_musicbrainz",
+                new=AsyncMock(return_value=mb_result),
+            ):
+                tracks = [
+                    {"artist": "A", "title": "Song1"},
+                    {"artist": "B", "title": "Song2"},
+                ]
+                result = await manager.enrich_batch(
+                    tracks, on_progress=lambda **kw: progress_calls.append(kw)
+                )
+                return result
+
+        result = asyncio.run(run())
+        assert result["completed"] == 2
+        assert result["errors"] == 0
+        assert result["total"] == 2
+        assert len(progress_calls) == 2
+
+    def test_enrich_batch_cancellation(self, manager):
+        """enrich_batch stops when cancel() is called."""
+        mb_result = {"tags": [], "genres": [], "artist_mbid": "x"}
+        completed = []
+
+        async def run():
+            with patch(
+                "mlx_audiogen.library.enrichment.manager.search_musicbrainz",
+                new=AsyncMock(return_value=mb_result),
+            ):
+                tracks = [
+                    {"artist": "A", "title": "Song1"},
+                    {"artist": "B", "title": "Song2"},
+                    {"artist": "C", "title": "Song3"},
+                ]
+                # Cancel after first track via progress callback
+                def on_prog(**kw):
+                    completed.append(kw)
+                    if kw["completed"] >= 1:
+                        manager.cancel()
+
+                result = await manager.enrich_batch(tracks, on_progress=on_prog)
+                return result
+
+        result = asyncio.run(run())
+        # Should have stopped after 1 (cancelled before 2nd starts)
+        assert result["completed"] <= 2
+        assert len(completed) <= 2
