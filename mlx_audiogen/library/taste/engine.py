@@ -14,11 +14,16 @@ Usage::
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional
 
 from ..models import TrackInfo
 from .profile import TasteProfile, WeightedTag
-from .signals import collect_generation_signals, collect_library_signals
+from .signals import (
+    collect_flywheel_signals,
+    collect_generation_signals,
+    collect_library_signals,
+)
 
 
 class TasteEngine:
@@ -88,6 +93,48 @@ class TasteEngine:
             WeightedTag.from_dict(t) for t in signals["preferred_models"]
         ]
         p.generation_count = len(history)
+
+        p.save(self._path)
+
+    def update_flywheel_signals(
+        self,
+        kept_dir: Path,
+    ) -> None:
+        """Update the profile with signals from starred generations.
+
+        Flywheel signals are weighted at 1.5x to reflect explicit user
+        approval (they starred these generations).
+
+        Args:
+            kept_dir: Directory containing kept generation metadata files.
+        """
+        signals = collect_flywheel_signals(kept_dir)
+        p = self._profile
+
+        # Merge flywheel genres into gen_genres with 1.5x weight boost
+        flywheel_genres = signals.get("flywheel_genres", [])
+        for tag_dict in flywheel_genres:
+            tag_dict["weight"] = round(tag_dict.get("weight", 0) * 1.5, 4)
+        p.gen_genres = [
+            WeightedTag.from_dict(t)
+            for t in flywheel_genres + [t.to_dict() for t in p.gen_genres]
+        ]
+
+        flywheel_moods = signals.get("flywheel_moods", [])
+        for tag_dict in flywheel_moods:
+            tag_dict["weight"] = round(tag_dict.get("weight", 0) * 1.5, 4)
+        p.gen_moods = [
+            WeightedTag.from_dict(t)
+            for t in flywheel_moods + [t.to_dict() for t in p.gen_moods]
+        ]
+
+        flywheel_instruments = signals.get("flywheel_instruments", [])
+        for tag_dict in flywheel_instruments:
+            tag_dict["weight"] = round(tag_dict.get("weight", 0) * 1.5, 4)
+        p.gen_instruments = [
+            WeightedTag.from_dict(t)
+            for t in flywheel_instruments + [t.to_dict() for t in p.gen_instruments]
+        ]
 
         p.save(self._path)
 

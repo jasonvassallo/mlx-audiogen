@@ -13,6 +13,7 @@ Supports early stopping, progress callbacks, and graceful stop via Event.
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -99,8 +100,10 @@ def save_lora(
 def load_lora_config(lora_dir: Path) -> LoRAConfig:
     """Load a LoRA config from a directory.
 
+    Supports versioned layouts (follows active symlink) and flat layouts.
+
     Args:
-        lora_dir: Directory containing config.json.
+        lora_dir: Directory containing config.json (or versioned layout).
 
     Returns:
         LoRAConfig instance.
@@ -108,7 +111,10 @@ def load_lora_config(lora_dir: Path) -> LoRAConfig:
     Raises:
         FileNotFoundError: If config.json doesn't exist.
     """
-    config_path = Path(lora_dir) / "config.json"
+    from .flywheel import resolve_lora_dir
+
+    resolved = resolve_lora_dir(Path(lora_dir))
+    config_path = resolved / "config.json"
     if not config_path.exists():
         raise FileNotFoundError(f"No config.json found in {lora_dir}")
     with open(config_path) as f:
@@ -121,9 +127,16 @@ def list_available_loras(
 ) -> list[dict]:
     """List available LoRA adapters from the loras directory.
 
+    Supports both flat layout (config.json at top level) and versioned
+    layout (v1/, v2/, ... with active symlink).  Flat layouts are
+    auto-migrated to versioned on first access.
+
     Returns:
-        List of dicts with name, base_model, profile, rank, created_at.
+        List of dicts with name, base_model, profile, rank, created_at,
+        plus versioning fields (active_version, total_versions).
     """
+    from .flywheel import resolve_lora_dir
+
     if not loras_dir.is_dir():
         return []
 
@@ -131,12 +144,31 @@ def list_available_loras(
     for d in sorted(loras_dir.iterdir()):
         if not d.is_dir():
             continue
-        config_path = d / "config.json"
-        if not config_path.exists():
-            continue
+
         try:
+            resolved = resolve_lora_dir(d)
+            config_path = resolved / "config.json"
+            if not config_path.exists():
+                continue
+
             with open(config_path) as f:
                 data = json.load(f)
+
+            # Count versions
+            versions = [
+                sub for sub in d.iterdir()
+                if sub.is_dir() and sub.name.startswith("v")
+            ]
+            active_version = None
+            active_link = d / "active"
+            if active_link.is_symlink():
+                target_name = Path(os.readlink(str(active_link))).name
+                if target_name.startswith("v"):
+                    try:
+                        active_version = int(target_name[1:])
+                    except ValueError:
+                        pass
+
             loras.append(
                 {
                     "name": data.get("name", d.name),
@@ -149,6 +181,8 @@ def list_available_loras(
                     "best_loss": data.get("best_loss"),
                     "training_samples": data.get("training_samples"),
                     "created_at": data.get("created_at"),
+                    "active_version": active_version,
+                    "total_versions": len(versions),
                 }
             )
         except (json.JSONDecodeError, OSError):

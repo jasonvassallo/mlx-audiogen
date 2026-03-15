@@ -6,10 +6,15 @@ weighted signal dicts that can be applied to a :class:`TasteProfile`.
 
 from __future__ import annotations
 
+import json
+import logging
 from collections import Counter
+from pathlib import Path
 from typing import Any, Optional
 
 from ..models import TrackInfo
+
+logger = logging.getLogger(__name__)
 
 
 def _weighted_tags_from_counter(
@@ -175,4 +180,89 @@ def collect_generation_signals(
         "kept_ratio": 0.0,  # requires tracking kept/discarded
         "avg_duration": avg_duration,
         "preferred_models": preferred_models,
+    }
+
+
+def collect_flywheel_signals(
+    kept_dir: Path,
+) -> dict[str, Any]:
+    """Collect taste signals from starred (kept) generations.
+
+    Reads all ``gen_*.json`` metadata files from *kept_dir* and extracts
+    genre, mood, and instrument keywords from the prompts.
+
+    Args:
+        kept_dir: Directory containing ``gen_*.json`` metadata files.
+
+    Returns:
+        Dict with ``flywheel_genres``, ``flywheel_moods``,
+        ``flywheel_instruments`` as weighted-tag lists, plus
+        ``flywheel_models`` and ``flywheel_count``.
+    """
+    # Lazy import to avoid circular dependency
+    from ...shared.prompt_suggestions import GENRES, INSTRUMENTS, MOODS
+
+    genre_counter: Counter = Counter()
+    mood_counter: Counter = Counter()
+    instrument_counter: Counter = Counter()
+    model_counter: Counter = Counter()
+
+    # Build lookup sets
+    all_genres = {g.lower() for g in GENRES}
+    all_moods = {m.lower() for m in MOODS}
+    all_instruments: set[str] = set()
+    for group in INSTRUMENTS.values():
+        for inst in group:
+            all_instruments.add(inst.lower())
+
+    kept_dir = Path(kept_dir)
+    if not kept_dir.is_dir():
+        return {
+            "flywheel_genres": [],
+            "flywheel_moods": [],
+            "flywheel_instruments": [],
+            "flywheel_models": [],
+            "flywheel_count": 0,
+        }
+
+    count = 0
+    for meta_path in kept_dir.glob("gen_*.json"):
+        try:
+            with open(meta_path) as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        count += 1
+        prompt = data.get("prompt", "").lower()
+        words = prompt.replace(",", " ").split()
+
+        for i, word in enumerate(words):
+            if word in all_genres:
+                genre_counter[word] += 1
+            if word in all_moods:
+                mood_counter[word] += 1
+            if word in all_instruments:
+                instrument_counter[word] += 1
+
+            # Check bigrams
+            if i + 1 < len(words):
+                bigram = f"{word} {words[i + 1]}"
+                if bigram in all_genres:
+                    genre_counter[bigram] += 1
+                if bigram in all_moods:
+                    mood_counter[bigram] += 1
+                if bigram in all_instruments:
+                    instrument_counter[bigram] += 1
+
+        model = data.get("model")
+        if model:
+            model_counter[model] += 1
+
+    return {
+        "flywheel_genres": _weighted_tags_from_counter(genre_counter),
+        "flywheel_moods": _weighted_tags_from_counter(mood_counter),
+        "flywheel_instruments": _weighted_tags_from_counter(instrument_counter),
+        "flywheel_models": _weighted_tags_from_counter(model_counter),
+        "flywheel_count": count,
     }
