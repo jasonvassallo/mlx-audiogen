@@ -1042,15 +1042,17 @@ def add_library_source(req: AddSourceRequest) -> dict:
 def update_library_source(source_id: str, req: UpdateSourceRequest) -> dict:
     """Update an existing library source's path and/or label."""
     cache = _get_library_cache()
-    # Validate path if provided
+    # Validate and expand path if provided
+    resolved_path: str | None = None
     if req.path is not None:
         p = Path(req.path).expanduser()
         if ".." in p.parts:
             raise HTTPException(400, "Path must not contain '..'")
         if not p.is_file():
             raise HTTPException(400, f"XML file not found: {req.path}")
+        resolved_path = str(p)
     try:
-        source = cache.update_source(source_id, path=req.path, label=req.label)
+        source = cache.update_source(source_id, path=resolved_path, label=req.label)
     except KeyError:
         raise HTTPException(404, f"Source not found: {source_id}")
     return source.to_dict()
@@ -1772,10 +1774,13 @@ def _get_pipeline(model_type: str) -> object:
     registered weights dir containing the model type name is used.
     """
     # Find weights dir
+    # Normalize underscores to hyphens so "stable_audio" matches "stable-audio"
+    normalized_type = model_type.replace("_", "-")
     weights_dir: str | None = None
     cache_key: str = ""
     for name, path in _weights_dirs.items():
-        if model_type in name.lower():
+        name_lower = name.lower()
+        if model_type in name_lower or normalized_type in name_lower:
             weights_dir = path
             cache_key = name
             break

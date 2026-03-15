@@ -3,6 +3,23 @@ import ParamSlider from "./ParamSlider";
 import DurationControl from "./DurationControl";
 import LoRASelector from "./LoRASelector";
 
+/** Build a compact summary string of current generation parameters. */
+function paramSummary(
+  model: string,
+  params: Record<string, unknown>,
+): string {
+  if (model === "musicgen") {
+    const t = Number(params.temperature ?? 1.0).toFixed(1);
+    const k = Math.round(Number(params.top_k ?? 250));
+    const g = Number(params.guidance_coef ?? 3.0).toFixed(1);
+    return `temp ${t} | top-k ${k} | cfg ${g}`;
+  }
+  const steps = Math.round(Number(params.steps ?? 8));
+  const cfg = Number(params.cfg_scale ?? 6.0).toFixed(1);
+  const sampler = String(params.sampler ?? "euler");
+  return `${steps} steps | cfg ${cfg} | ${sampler}`;
+}
+
 export default function ParameterPanel() {
   const params = useStore((s) => s.params);
   const setParam = useStore((s) => s.setParam);
@@ -10,14 +27,15 @@ export default function ParameterPanel() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-xs font-medium uppercase tracking-wider text-text-secondary">
-        Parameters
-      </h3>
+      {/* Duration — always visible */}
+      <div>
+        <h3 className="text-xs font-medium uppercase tracking-wider text-text-secondary mb-3">
+          Parameters
+        </h3>
+        <DurationControl />
+      </div>
 
-      {/* Duration — supports both seconds and BPM-based bars */}
-      <DurationControl />
-
-      {/* Seed control */}
+      {/* Seed control — always visible */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
           <label className="text-xs font-medium text-text-secondary">
@@ -56,7 +74,7 @@ export default function ParameterPanel() {
         )}
       </div>
 
-      {/* Output mode */}
+      {/* Output mode — always visible */}
       <div className="space-y-1">
         <label className="text-xs font-medium text-text-secondary">
           Output
@@ -83,16 +101,26 @@ export default function ParameterPanel() {
         </select>
       </div>
 
-      {/* LoRA selector (MusicGen only) */}
+      {/* LoRA selector (MusicGen only) — always visible */}
       {params.model === "musicgen" && <LoRASelector />}
 
-      <div className="border-t border-border pt-3">
-        {params.model === "musicgen" ? (
-          <MusicGenParams />
-        ) : (
-          <StableAudioParams />
-        )}
-      </div>
+      {/* Collapsible generation parameters */}
+      <details className="group border-t border-border pt-3">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium text-text-secondary hover:text-text-primary select-none [&::-webkit-details-marker]:hidden">
+          <span className="transition-transform group-open:rotate-90 text-[10px]">&#9654;</span>
+          <span>Generation Parameters</span>
+          <span className="ml-auto font-normal text-text-muted tabular-nums text-[10px]">
+            {paramSummary(params.model ?? "musicgen", params as unknown as Record<string, unknown>)}
+          </span>
+        </summary>
+        <div className="mt-3">
+          {params.model === "musicgen" ? (
+            <MusicGenParams />
+          ) : (
+            <StableAudioParams />
+          )}
+        </div>
+      </details>
     </div>
   );
 }

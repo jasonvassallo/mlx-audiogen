@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "./store/useStore";
 import { useServerHeartbeat } from "./hooks/useServerHeartbeat";
 import Header from "./components/Header";
@@ -27,6 +27,24 @@ const TABS = [
   { id: "settings", label: "Settings" },
 ];
 
+const SIDEBAR_STORAGE_KEY = "mlx_sidebar_width";
+const SIDEBAR_MIN = 280;
+const SIDEBAR_MAX = 480;
+const SIDEBAR_DEFAULT = 320;
+
+function loadSidebarWidth(): number {
+  try {
+    const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    if (stored) {
+      const n = parseInt(stored, 10);
+      if (!isNaN(n) && n >= SIDEBAR_MIN && n <= SIDEBAR_MAX) return n;
+    }
+  } catch {
+    /* ignore */
+  }
+  return SIDEBAR_DEFAULT;
+}
+
 export default function App() {
   const loadModels = useStore((s) => s.loadModels);
   const loadHistory = useStore((s) => s.loadHistory);
@@ -44,6 +62,57 @@ export default function App() {
   const libraryTracks = useStore((s) => s.libraryTracks);
   const activeSourceId = useStore((s) => s.activeSourceId);
   const [showMetadataEditor, setShowMetadataEditor] = useState(false);
+
+  // Resizable sidebar
+  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current) return;
+      e.preventDefault();
+      const delta = e.clientX - dragStartX.current;
+      const newWidth = Math.min(
+        SIDEBAR_MAX,
+        Math.max(SIDEBAR_MIN, dragStartWidth.current + delta),
+      );
+      setSidebarWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      if (!isDragging.current) return;
+      isDragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      // Persist final width
+      try {
+        localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarWidth));
+      } catch {
+        /* ignore */
+      }
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [sidebarWidth]);
+
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      isDragging.current = true;
+      dragStartX.current = e.clientX;
+      dragStartWidth.current = sidebarWidth;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [sidebarWidth],
+  );
 
   useEffect(() => {
     loadModels();
@@ -166,7 +235,10 @@ export default function App() {
 
       <main className="flex flex-1 overflow-hidden">
         {/* Left panel: Controls */}
-        <div className="flex w-80 shrink-0 flex-col border-r border-border bg-surface-1">
+        <div
+          className="flex shrink-0 flex-col border-r border-border bg-surface-1 relative"
+          style={{ width: sidebarWidth }}
+        >
           <TabBar
             active={activeTab}
             tabs={TABS}
@@ -227,6 +299,14 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* Resize drag handle */}
+          <div
+            onMouseDown={handleResizeStart}
+            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-10 group/handle"
+          >
+            <div className="h-full w-full transition-colors group-hover/handle:bg-accent/30" />
+          </div>
         </div>
 
         {/* Right panel: History or Library Track Table */}
