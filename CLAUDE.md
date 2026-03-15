@@ -39,10 +39,10 @@ uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lo
 uv run mlx-audiogen --model musicgen --prompt "happy rock song" --seconds 5 --lora-path /path/to/lora/
 
 # Run tests
-uv run pytest                                     # all tests (469 tests, ~14s)
+uv run pytest                                     # all tests (512 tests, ~14s)
 uv run pytest tests/test_specific.py::test_name   # single test
 uv run pytest -m integration -v                   # integration tests only (real weights/XML, ~30s)
-uv run pytest -m "not integration"                # unit tests only (390 tests)
+uv run pytest -m "not integration"                # unit tests only
 
 # Run end-to-end demo (generates audio + separates stems → output/demucs_e2e_demo/)
 uv run python scripts/demucs_e2e_demo.py
@@ -121,28 +121,26 @@ mlx_audiogen/
 │   │   ├── config.py, dit.py, vae.py, conditioners.py, sampling.py, pipeline.py, convert.py
 │   └── demucs/       # Source separation: HTDemucs v4 (hybrid U-Net + cross-transformer)
 │       ├── config.py, model.py, layers.py, transformer.py, spec.py, pipeline.py, convert.py
-├── lora/             # LoRA fine-tuning for MusicGen (Phase 9g)
+├── lora/             # LoRA fine-tuning for MusicGen
 │   ├── config.py     # LoRAConfig dataclass + quick/balanced/deep profiles
 │   ├── inject.py     # LoRALinear class, apply_lora/remove_lora model surgery
 │   ├── dataset.py    # Audio scanning, chunking, delay pattern for training
 │   ├── trainer.py    # Training loop with masked loss, early stopping, save/load
 │   └── flywheel.py   # FlywheelManager: star tracking, versioned adapters, blend datasets
-├── library/          # Music library scanner (Phase 9g-2)
+├── library/          # Music library scanner
 │   ├── models.py     # TrackInfo, PlaylistInfo, LibrarySource dataclasses
 │   ├── parsers.py    # Apple Music (plistlib) + rekordbox (defusedxml) XML parsers
 │   ├── cloud_paths.py # file:// URL resolution + iCloud placeholder detection
 │   ├── description_gen.py # Metadata → text description (template + LLM modes)
 │   ├── collections.py # Training collection CRUD + collection_to_training_data bridge
 │   ├── cache.py      # In-memory LibraryCache with search/sort/filter/paginate
-│   ├── enrichment/   # Web enrichment (Phase 9g-3)
+│   ├── enrichment/   # Web enrichment
 │   │   ├── enrichment_db.py  # SQLite cache (~/.mlx-audiogen/enrichment.db)
 │   │   ├── rate_limiter.py   # Per-API async token bucket (MB:1/s, LFM:5/s, DC:1/s)
 │   │   ├── clients.py        # httpx async client factory
-│   │   ├── musicbrainz.py    # MusicBrainz recording search + tag extraction
-│   │   ├── lastfm.py         # Last.fm track info + crowd tags
-│   │   ├── discogs.py        # Discogs release search + style taxonomy
+│   │   ├── musicbrainz.py, lastfm.py, discogs.py  # API clients
 │   │   └── manager.py        # Orchestrator: cache check → fetch → merge → store
-│   └── taste/        # Taste learning engine (Phase 9g-3)
+│   └── taste/        # Taste learning engine
 │       ├── profile.py        # TasteProfile + WeightedTag dataclasses
 │       ├── signals.py        # Library + generation signal collectors
 │       └── engine.py         # TasteEngine: compute, persist, query profiles
@@ -160,17 +158,12 @@ web/                    # React + Vite + TypeScript SPA (dark/pro audio UI)
 │   ├── hooks/useServerHeartbeat.ts  # Polls /api/health, reconnects on server URL change
 │   ├── components/
 │   │   ├── App.tsx          # Root layout: Header → resizable sidebar + history/library → TransportBar
-│   │   ├── TabBar.tsx       # Reusable tab header with active/inactive styling
 │   │   ├── TransportBar.tsx # DAW-style bottom bar: Master BPM, pitch mode, audio device, status
-│   │   ├── ServerPanel.tsx  # Remote server URL config + connection test + status indicator
-│   │   ├── SuggestPanel.tsx # Prompt analysis tags + suggestion cards + preset save/load
-│   │   ├── ParameterPanel.tsx  # Collapsible model-aware sliders + output_mode dropdown
 │   │   ├── HistoryPanel.tsx    # Job history + star rating + MIDI download + stem separation
 │   │   ├── LibraryPanel.tsx    # Library tab: source selector + playlist browser + sortable track table
 │   │   ├── MetadataEditor.tsx  # Modal: curate collection + AI descriptions + Save & Train
-│   │   ├── Header.tsx       # Logo + nav + PayPal support link
-│   │   └── ...              # ModelSelector, PromptInput, GenerateButton, AudioPlayer, AudioDeviceSelector
-│   └── types/api.ts    # TypeScript types mirroring server Pydantic models (PresetInfo, StemResult, LibraryTrackInfo, etc.)
+│   │   └── ...              # TabBar, ServerPanel, SuggestPanel, ParameterPanel, ModelSelector, PromptInput, GenerateButton, AudioPlayer, AudioDeviceSelector, Header, EnhancePreview, TagAutocomplete, LLMSettingsPanel, LoRASelector, TrainPanel, FlywheelSettings
+│   └── types/api.ts    # TypeScript types mirroring server Pydantic models
 ├── package.json        # Volta-pinned Node 22 + npm 10
 └── vite.config.ts      # Dev proxy to :8420, Tailwind CSS v4
 plugin/                 # JUCE native VST3/AU plugin
@@ -185,109 +178,72 @@ m4l/
 └── mlx-audiogen.js   # Node for Max HTTP client for Ableton Live integration
 ```
 
-**MusicGen pipeline flow:** tokenize text -> T5 encode -> `enc_to_dec_proj` -> autoregressive transformer with KV cache + classifier-free guidance + codebook delay pattern -> top-k sampling -> EnCodec decode -> 32kHz mono WAV
+### Pipeline Flows
 
-**MusicGen melody flow:** same as above, but also extracts a 12-bin chromagram from the melody audio, projects it via `audio_enc_to_dec_proj`, and concatenates with T5 tokens for cross-attention conditioning
+**MusicGen:** tokenize text → T5 encode → `enc_to_dec_proj` → autoregressive transformer with KV cache + classifier-free guidance + codebook delay pattern → top-k sampling → EnCodec decode → 32kHz mono WAV
 
-**MusicGen style flow:** MERT extracts features from reference audio at 75Hz -> Linear(768→512) -> 8-layer style transformer -> BatchNorm -> RVQ(6 codebooks) -> downsample by 15 -> Linear(512→1536) output projection -> concatenate with T5 tokens for cross-attention. Generation uses dual-CFG with 3 forward passes per step: `uncond + cfg * (style + beta * (full - style) - uncond)`
+**MusicGen melody:** same as above, but also extracts a 12-bin chromagram from melody audio (STFT n_fft=16384 → chroma filter bank → argmax one-hot), projects via `audio_enc_to_dec_proj` Linear(12, hidden_size), concatenates with T5 tokens for cross-attention. Auto-detected from HF config (`model_type: "musicgen_melody"`).
 
-**Stable Audio pipeline flow:** tokenize text -> T5 encode + NumberEmbedder time conditioning -> rectified flow ODE sampling (euler/rk4) through DiT -> Oobleck VAE decode -> 44.1kHz stereo WAV
+**MusicGen style:** MERT extracts features at 75Hz → Linear(768→512) → 8-layer style transformer → BatchNorm → RVQ(6 codebooks, 1024 bins) → downsample by 15 → Linear(512→1536) → cross-attention tokens. Dual-CFG: 3 forward passes per step, `uncond + cfg * (style + beta * (full - style) - uncond)` (default cfg=3.0, beta=5.0). Uses audiocraft format (`state_dict.bin`), MERT from `m-a-p/MERT-v1-95M`.
 
-**Stable Audio 1.0 variant:** adds a `seconds_start` NumberEmbedder alongside `seconds_total`, auto-detected from conditioner weights at load time
+**Stable Audio:** tokenize text → T5 encode + NumberEmbedder time conditioning → rectified flow ODE sampling (euler/rk4) through DiT → Oobleck VAE decode → 44.1kHz stereo WAV. 1.0 variant adds `seconds_start` alongside `seconds_total`, auto-detected from conditioner weights.
 
-**HTDemucs (Demucs v4) pipeline flow:** stereo 44.1kHz audio -> STFT (numpy, n_fft=4096) -> complex-as-channels (interleaved: [R0, I0, R1, I1]) -> instance normalize -> parallel spectral U-Net (Conv2d, stride along frequency) + temporal U-Net (Conv1d, stride along time) with DConv residual branches -> CrossTransformerEncoder (5 layers, alternating self-attn and cross-attn between branches) -> parallel decoder U-Nets with skip connections -> spectral branch: CaC mask -> iSTFT; temporal branch: denormalize -> output = spectral + temporal -> 4 sources (drums, bass, other, vocals). For long audio, uses overlap-add with triangle window (25% overlap). Non-44.1kHz input is resampled via reflect-padded FFT sinc method (alias-free, no boundary artifacts); stems are resampled back to the original sample rate on output.
+**HTDemucs (Demucs v4):** stereo 44.1kHz → STFT (numpy, n_fft=4096) → complex-as-channels (interleaved [R0,I0,R1,I1]) → instance normalize → parallel spectral U-Net + temporal U-Net with DConv branches → CrossTransformerEncoder (5 layers, alternating self/cross-attn) → decoder U-Nets → spectral CaC mask + iSTFT; temporal denormalize → sum → 4 stems. Overlap-add with triangle window (25% overlap) for long audio. Non-44.1kHz input resampled via reflect-padded FFT sinc; stems resampled back to original rate.
 
-**Flywheel intelligence flow:** user stars generations in History (★ button) → WAV + metadata saved to `~/.mlx-audiogen/kept/{adapter}/` → when star count hits threshold (default 10, configurable), auto-retrain builds cumulative dataset at blend ratio (default 80% library / 20% kept gens) → new adapter version created (`v1/`, `v2/`, ... with `active` symlink + `changelog.json`) → taste profile refreshed with flywheel signals (1.5x weight) → prompt suggestions improve → repeat cycle. Adapter versions are fully independent — each has own `lora.safetensors` + `config.json` + `changelog.json`. Flat-layout LoRAs auto-migrate to versioned on first access.
+**Flywheel:** star generations → WAV saved to `~/.mlx-audiogen/kept/{adapter}/` → at threshold (default 10), auto-retrain builds cumulative dataset (80% library / 20% kept) → new adapter version (`v1/`, `v2/`, ... with `active` symlink + `changelog.json`) → taste profile refreshed (1.5x weight) → suggestions improve. Flat-layout LoRAs auto-migrate to versioned.
 
-**LoRA fine-tuning flow:** scan data dir (WAV + metadata.jsonl) → load & chunk audio (10s default, max 40s) → EnCodec encode → apply codebook delay pattern → freeze base model + inject LoRALinear wrappers (rank A/B matrices, B=zero-init) → teacher-forcing with causal mask → masked cross-entropy loss (only valid non-BOS positions) → AdamW on LoRA params only → save best checkpoint as lora.safetensors + config.json to `~/.mlx-audiogen/loras/`. At generation time: `apply_lora()` wraps targeted nn.Linear layers, `load_weights(strict=False)` loads A/B matrices, output = `base(x) + scale * (x @ A @ B)` where scale = alpha/rank.
+**LoRA:** scan data dir → chunk audio (10s default, max 40s) → EnCodec encode → codebook delay pattern → freeze base + inject LoRALinear (A/B matrices, B=zero-init) → teacher-forcing masked cross-entropy → AdamW on LoRA params → save to `~/.mlx-audiogen/loras/`. Generation: `output = base(x) + (alpha/rank) * (x @ A @ B)`.
 
 ## HTTP Server Architecture
 
 `server/app.py` provides an async FastAPI server for tool integration (Max for Live, web UIs, external scripts):
 
-- **LRU Pipeline Cache** (`PipelineCache`): `OrderedDict`-based cache using `move_to_end()` / `popitem(last=False)` to keep N most-recently-used model pipelines loaded. Default max_size=2. Eviction prints a message to stdout.
-- **Async Job Queue**: Generation requests return immediately with a job ID. A single-thread `ThreadPoolExecutor` runs generation (MLX is GPU-bound). Jobs are polled via `/api/status/{id}`.
-- **In-memory WAV encoding**: Completed audio is stored as numpy arrays and encoded to WAV bytes on download via soundfile into `io.BytesIO`.
-- **Job cleanup**: Completed/errored jobs older than 5 minutes are cleaned up when the job limit (100) is reached.
-- **CORS**: Enabled for all origins to support localhost Max for Live / browser clients.
-- **Rate Limiting**: In-memory sliding-window per-IP rate limiter. Generation endpoints: 10 req/min. General API: 60 req/min. Health checks exempt (used for heartbeat polling). Returns HTTP 429 with descriptive error when exceeded.
-- **Server binds to `127.0.0.1` by default** (localhost only — not exposed to network).
+- **LRU Pipeline Cache**: `OrderedDict`-based, keeps N most-recently-used pipelines loaded (default max_size=2)
+- **Async Job Queue**: Returns job ID immediately, single-thread `ThreadPoolExecutor` (MLX is GPU-bound), poll via `/api/status/{id}`
+- **In-memory WAV encoding**: Numpy arrays encoded to WAV bytes on download via soundfile into `io.BytesIO`
+- **Job cleanup**: Completed/errored jobs >5 min old cleaned up at job limit (100)
+- **CORS**: All origins (localhost Max for Live / browser clients)
+- **Rate Limiting**: Sliding-window per-IP. Generation: 10 req/min. General: 60 req/min. Health exempt. HTTP 429 on exceed
+- **Binds to `127.0.0.1`** by default (localhost only)
 
 ### API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/generate` | Submit generation request (returns job ID). Supports `output_mode`: `audio`, `midi`, or `both` |
-| `GET` | `/api/status/{id}` | Poll job status (`queued`/`running`/`done`/`error`) with real-time `progress` (0.0-1.0) |
+| `POST` | `/api/generate` | Submit generation (returns job ID). `output_mode`: audio/midi/both |
+| `GET` | `/api/status/{id}` | Poll job status + real-time `progress` (0.0-1.0) |
 | `GET` | `/api/audio/{id}` | Download generated WAV |
-| `GET` | `/api/midi/{id}` | Download generated MIDI (when `output_mode` is `midi` or `both`) |
+| `GET` | `/api/midi/{id}` | Download generated MIDI |
 | `GET` | `/api/models` | List available models and loading status |
-| `GET` | `/api/jobs` | List all active/recent jobs (multi-instance monitoring) |
-| `GET` | `/api/health` | Health check for browser heartbeat |
-| `POST` | `/api/suggest` | AI prompt suggestions (analyze prompt + return refined versions) |
-| `POST` | `/api/midi-to-prompt` | Convert MIDI file to descriptive text prompt |
-| `POST` | `/api/separate/{id}` | Separate audio into stems (bass/mid/high or drums/bass/vocals/other) |
-| `GET` | `/api/presets` | List shared presets from `~/.mlx-audiogen/presets/` |
-| `POST` | `/api/presets/{name}` | Save a preset to the shared directory |
-| `GET` | `/api/presets/{name}` | Load a preset by name |
-| `POST` | `/api/enhance` | Enhance prompt via LLM or template fallback |
-| `GET` | `/api/tags` | Tag database for autocomplete (14 categories: genre, sub_genre, mood, instrument, vocal, key, bpm, era, production, artist, label, structure, rating, availability) |
-| `GET` | `/api/llm/models` | List discovered local LLM models |
-| `POST` | `/api/llm/select` | Select and load an LLM model |
-| `GET` | `/api/llm/status` | LLM status (loaded, memory, idle time) |
-| `GET` | `/api/memory` | Get prompt memory (history + style profile) |
-| `DELETE` | `/api/memory` | Clear prompt memory |
-| `GET` | `/api/memory/export` | Export prompt memory as JSON file |
-| `POST` | `/api/memory/import` | Import prompt memory from JSON file |
-| `GET` | `/api/settings` | Get server settings (LLM model, AI enhance, history context) |
-| `POST` | `/api/settings` | Update server settings |
-| `GET` | `/api/loras` | List available LoRA adapters |
-| `GET` | `/api/loras/{name}` | Get LoRA adapter config |
-| `DELETE` | `/api/loras/{name}` | Delete a LoRA adapter |
-| `POST` | `/api/train` | Start LoRA training (returns job ID). Supports `collection` field as alternative to `data_dir` |
-| `GET` | `/api/train/status/{id}` | Poll training progress |
-| `POST` | `/api/train/stop/{id}` | Stop active training |
-| `GET` | `/api/library/sources` | List configured library sources |
-| `POST` | `/api/library/sources` | Add a library source (Apple Music or rekordbox XML) |
-| `PUT` | `/api/library/sources/{id}` | Update source path/label |
-| `DELETE` | `/api/library/sources/{id}` | Remove a source |
+| `GET` | `/api/jobs` | List all active/recent jobs |
+| `GET` | `/api/health` | Health check for heartbeat |
+| `POST` | `/api/suggest` | AI prompt suggestions |
+| `POST` | `/api/midi-to-prompt` | Convert MIDI to text prompt |
+| `POST` | `/api/separate/{id}` | Stem separation |
+| `GET/POST` | `/api/presets`, `/api/presets/{name}` | List/save/load presets (`~/.mlx-audiogen/presets/`) |
+| `POST` | `/api/enhance` | LLM prompt enhancement |
+| `GET` | `/api/tags` | Tag database (14 categories) |
+| `GET/POST` | `/api/llm/models`, `/api/llm/select`, `/api/llm/status` | LLM model management |
+| `GET/DELETE` | `/api/memory` | Prompt memory CRUD |
+| `GET/POST` | `/api/memory/export`, `/api/memory/import` | Memory export/import |
+| `GET/POST` | `/api/settings` | Server settings |
+| `GET/DELETE` | `/api/loras`, `/api/loras/{name}` | LoRA adapter management |
+| `POST` | `/api/train` | Start LoRA training (supports `collection` or `data_dir`) |
+| `GET/POST` | `/api/train/status/{id}`, `/api/train/stop/{id}` | Training progress/control |
+| `GET/POST/PUT/DELETE` | `/api/library/sources`, `/api/library/sources/{id}` | Library source CRUD |
 | `POST` | `/api/library/scan/{id}` | Parse/refresh library XML |
-| `GET` | `/api/library/playlists/{id}` | List playlists for a source |
-| `GET` | `/api/library/tracks/{id}` | Search/filter/sort/paginate tracks (query params: q, artist, album, genre, key, bpm_min/max, year_min/max, rating_min, loved, available, sort, order, offset, limit) |
-| `GET` | `/api/library/playlist-tracks/{sid}/{pid}` | Get tracks in a playlist |
-| `POST` | `/api/library/describe` | Generate descriptions from track metadata (template/LLM mode) |
-| `POST` | `/api/library/suggest-name` | Suggest LoRA adapter name from tracks |
-| `POST` | `/api/library/generate-prompt` | Playlist analysis + prompt generation |
-| `GET` | `/api/collections` | List saved collections |
-| `POST` | `/api/collections` | Create a new collection |
-| `GET` | `/api/collections/{name}` | Get collection details |
-| `PUT` | `/api/collections/{name}` | Update collection |
-| `DELETE` | `/api/collections/{name}` | Delete collection |
-| `GET` | `/api/collections/{name}/export` | Export as JSON download |
-| `POST` | `/api/collections/import` | Import from JSON upload |
-| `GET` | `/api/credentials/status` | Which services have API keys configured (no values exposed) |
-| `POST` | `/api/credentials/{service}` | Store API key in macOS Keychain |
-| `DELETE` | `/api/credentials/{service}` | Remove API key from Keychain |
-| `POST` | `/api/enrich/tracks` | Enrich batch of tracks (body: track IDs or artist/title pairs) |
-| `GET` | `/api/enrich/status` | Current enrichment job progress |
-| `POST` | `/api/enrich/all/{source_id}` | Enrich all tracks in a library source (background) |
-| `POST` | `/api/enrich/cancel` | Cancel running enrichment job |
-| `GET` | `/api/enrich/track/{track_id}` | Get enrichment data for a single track |
-| `GET` | `/api/enrich/stats` | Enrichment cache statistics |
-| `GET` | `/api/taste/profile` | Current taste profile |
-| `POST` | `/api/taste/refresh` | Recompute taste profile from all signals |
-| `GET` | `/api/taste/suggestions` | Personalized prompt suggestions |
-| `PUT` | `/api/taste/overrides` | Manual taste preference overrides |
-| `POST` | `/api/star/{id}` | Star a generation (saves audio for flywheel re-training) |
-| `DELETE` | `/api/star/{id}` | Unstar a generation |
-| `GET` | `/api/flywheel/config` | Flywheel settings (threshold, blend, auto-retrain) |
-| `PUT` | `/api/flywheel/config` | Update flywheel settings |
-| `GET` | `/api/flywheel/status` | Stars since last train, threshold state |
-| `GET` | `/api/loras/{name}/versions` | List all adapter versions with changelog |
-| `GET` | `/api/loras/{name}/versions/{v}` | Full version changelog |
-| `PUT` | `/api/loras/{name}/active/{v}` | Set active adapter version (revert) |
-| `POST` | `/api/flywheel/retrain/{name}` | Manual re-train trigger |
-| `POST` | `/api/flywheel/reset/{name}` | Clear kept generations cache |
+| `GET` | `/api/library/playlists/{id}` | List playlists |
+| `GET` | `/api/library/tracks/{id}` | Search/filter/sort/paginate tracks |
+| `GET` | `/api/library/playlist-tracks/{sid}/{pid}` | Playlist tracks |
+| `POST` | `/api/library/describe`, `suggest-name`, `generate-prompt` | AI library tools |
+| CRUD | `/api/collections`, `/api/collections/{name}` | Collection management + export/import |
+| `GET/POST/DELETE` | `/api/credentials/status`, `/api/credentials/{service}` | Keychain credential management |
+| `POST/GET` | `/api/enrich/tracks`, `/api/enrich/all/{source_id}`, `/api/enrich/status`, `/api/enrich/cancel`, `/api/enrich/track/{id}`, `/api/enrich/stats` | Enrichment pipeline |
+| `GET/POST/PUT` | `/api/taste/profile`, `/api/taste/refresh`, `/api/taste/suggestions`, `/api/taste/overrides` | Taste engine |
+| `POST/DELETE` | `/api/star/{id}` | Star/unstar generation |
+| `GET/PUT` | `/api/flywheel/config`, `/api/flywheel/status` | Flywheel settings |
+| `GET/PUT` | `/api/loras/{name}/versions`, `/api/loras/{name}/active/{v}` | Adapter version management |
+| `POST` | `/api/flywheel/retrain/{name}`, `/api/flywheel/reset/{name}` | Manual retrain/reset |
 
 Interactive API docs at `http://localhost:8420/docs` when running.
 
@@ -295,120 +251,73 @@ Interactive API docs at `http://localhost:8420/docs` when running.
 
 `web/` is a React + Vite + TypeScript SPA with a dark/pro audio aesthetic (DAW-inspired).
 
-- **Tech stack**: React 19, TypeScript, Vite 6, Tailwind CSS v4, Zustand 5
-- **Node management**: Volta pins Node 22 and npm 10 in `web/package.json`
-- **Dev mode**: `npm run dev` starts Vite on :3000, proxies `/api/*` to FastAPI on :8420
-- **Production**: `npm run build` outputs to `web/dist/`, served by FastAPI's static file mount
-- **Layout**: Header → sidebar (5 tabs: Generate/Suggest/Train/Library/Settings, w-80) + main area (history or track table) → TransportBar (BPM/pitch/device/status/progress)
-- **Components**: TabBar, TransportBar, ServerPanel, SuggestPanel (analysis tags + presets), ParameterPanel (collapsible sliders + output_mode), GenerateButton, AudioPlayer (waveform + setSinkId), HistoryPanel (jobs + star rating + MIDI + stems), LibraryPanel (sidebar playlists + sortable track table + Generate Like This / Train on These), MetadataEditor (collection curation + AI descriptions), AudioDeviceSelector, Header, EnhancePreview, TagAutocomplete, LLMSettingsPanel, LoRASelector, TrainPanel (folder/collection source + profiles + progress + loss chart), FlywheelSettings (auto-retrain toggle + threshold + blend slider + changelog viewer)
-- **State**: Zustand store manages models, params, jobs, history, suggestions, presets, stems, output_mode, tabs, enhance flow, settings, tags, memory, LLM, server URL, LoRAs, library (sources/playlists/tracks with search/sort/filter), collections, "Generate Like This" results, and flywheel config/status
-- **Sidebar**: Resizable (drag handle, 280-480px, persisted to localStorage), collapsible parameter sections with summary lines
-- **Prompt Suggestions**: UI shows colored analysis tags + suggestion cards with Use/Copy buttons
-- **Presets**: `.mlxpreset` JSON files in `~/.mlx-audiogen/presets/`. Name validated with `^[a-zA-Z0-9_-]{1,64}$`
-- **Stem Separation**: Color-coded inline `<audio>` players. Blob URLs eagerly downloaded to survive server's 5-minute cleanup
-- **MIDI Output**: `output_mode` dropdown (audio/midi/both) in ParameterPanel. History shows MIDI download when available
-- **Audio output**: AudioDeviceSelector allows choosing output device via `setSinkId()`
-- **Launch**: `uv run mlx-audiogen-server --weights-dir <path> --open` starts server and opens browser
-- **LLM Enhancement**: EnhancePreview card with analysis tags + Accept & Generate / Edit / Use Original. Enhance button in PromptInput when AI enhance is enabled
-- **Tag Autocomplete**: Dropdown filtered by last typed token (min 2 chars). Color-coded: genre (amber), mood (emerald), instrument (sky), era (purple), production (rose)
-- **Prompt Memory**: `~/.mlx-audiogen/prompt_memory.json` (max 2000 entries). Style profile auto-derived. Export/Import/Clear via LLMSettingsPanel
-- **Server Settings**: `~/.mlx-audiogen/settings.json` (LLM model, AI enhance, history context 0-200). Separate from client-side IndexedDB settings (retention/BPM/pitch)
-- **Remote Server**: ServerPanel in Settings tab. URL persisted in localStorage. Connection tested via `/api/health`. Heartbeat auto-reconnects. Server needs `--host 0.0.0.0` for remote access
+- **Tech stack**: React 19, TypeScript, Vite 6, Tailwind CSS v4, Zustand 5. Volta pins Node 22 + npm 10
+- **Dev mode**: `npm run dev` → :3000, proxies `/api/*` to :8420. **Production**: `npm run build` → `web/dist/`, served by FastAPI
+- **Layout**: Header → sidebar (5 tabs: Generate/Suggest/Train/Library/Settings, w-80) + main area (history or track table) → TransportBar (BPM/pitch/device/status)
+- **Sidebar**: Resizable (280-480px, persisted to localStorage), collapsible parameter sections. GenerateButton pinned at bottom
+- **Key components**: SuggestPanel (analysis tags + suggestion cards + presets), ParameterPanel (collapsible sliders + output_mode), HistoryPanel (jobs + star rating + MIDI + stems), LibraryPanel (playlist browser + sortable track table + Generate Like This / Train on These), MetadataEditor (collection curation + AI descriptions), TrainPanel (folder/collection source + profiles + progress + loss chart), FlywheelSettings (auto-retrain + threshold + blend + changelog viewer), EnhancePreview, TagAutocomplete (14 categories, color-coded), LLMSettingsPanel, LoRASelector, ServerPanel, AudioDeviceSelector
+- **State**: Zustand manages models, params, jobs, history, suggestions, presets, stems, output_mode, enhance flow, settings, tags, memory, LLM, server URL, LoRAs, library, collections, flywheel config/status
+- **Presets**: `.mlxpreset` JSON in `~/.mlx-audiogen/presets/`. Name: `^[a-zA-Z0-9_-]{1,64}$`
+- **Stems**: Color-coded inline `<audio>` players. Blob URLs eagerly downloaded to survive server's 5-min cleanup
+- **Prompt Memory**: `~/.mlx-audiogen/prompt_memory.json` (max 2000). Export/Import/Clear in LLMSettingsPanel
+- **Settings**: Server-side `~/.mlx-audiogen/settings.json` (LLM, AI enhance, history context). Client-side IndexedDB (retention/BPM/pitch)
+- **Remote Server**: ServerPanel in Settings tab. URL in localStorage. Heartbeat auto-reconnects. Needs `--host 0.0.0.0`
 
 ## Cloud Deployment (Mac Mini)
 
-The production deployment runs on a Mac Mini (Apple Silicon) behind a Cloudflare Tunnel, serving both the web UI and API at `https://musicgen.djvassallo.com`.
+Production at `https://musicgen.djvassallo.com` via Cloudflare Tunnel on Mac Mini (Apple Silicon).
 
-### Architecture
 ```
-Browser → Cloudflare Edge → cloudflared tunnel (Mac Mini)
-                              ↓
-                         localhost:8420 → FastAPI (web UI + API)
+Browser → Cloudflare Edge → cloudflared tunnel (Mac Mini) → localhost:8420 → FastAPI
 ```
 
-### LaunchAgent Services (Mac Mini)
-Two LaunchAgents auto-start on login and restart on failure (`KeepAlive`):
+### LaunchAgent Services
+Two LaunchAgents auto-start on login (`KeepAlive`):
 
-1. **Cloudflare Tunnel** (`com.jasonvassallo.cloudflared-tunnel`)
-   - Config: `~/.cloudflared/config.yml` (email-triage tunnel, 7 ingress rules + catch-all)
-   - Serves: `musicgen.djvassallo.com`, `www.djvassallo.com`, `ssh/lima/vnc/smb.djvassallo.com`
-   - Logs: `/opt/homebrew/var/log/cloudflared.log`
+1. **Cloudflare Tunnel** (`com.jasonvassallo.cloudflared-tunnel`) — `~/.cloudflared/config.yml` (email-triage tunnel, serves musicgen/www/ssh/lima/vnc/smb.djvassallo.com)
+2. **mlx-audiogen Server** (`com.jasonvassallo.mlx-audiogen-server`) — `~/bin/mlx-audiogen-server.sh`, uses external venv at `~/mlx-audiogen-venv/` to avoid TCC restrictions (LaunchAgents can't read `~/Documents/`)
 
-2. **mlx-audiogen Server** (`com.jasonvassallo.mlx-audiogen-server`)
-   - Wrapper: `~/bin/mlx-audiogen-server.sh` (uses external venv to avoid TCC restrictions)
-   - Venv: `~/mlx-audiogen-venv/` (non-editable install, outside `~/Documents` for TCC)
-   - Weights: `~/mlx-audiogen-data/converted/` (symlinked from project's `converted/`)
-   - Web dist: `~/mlx-audiogen-data/web-dist/` (copied from `web/dist/` after build)
-   - Logs: `~/Library/Logs/mlx-audiogen-server.log`
+### TCC Workaround
+- **Venv**: `~/mlx-audiogen-venv/` with non-editable install (`uv pip install ".[server]"`)
+- **Weights**: `~/mlx-audiogen-data/converted/` (symlinked from project)
+- **Web dist**: `~/mlx-audiogen-data/web-dist/` (copied from `web/dist/`)
 
-### macOS TCC Restriction
-LaunchAgents cannot read files in `~/Documents/` (TCC — Transparency, Consent, and Control). The workaround:
-- **Venv**: Created at `~/mlx-audiogen-venv/` with non-editable install (`uv pip install ".[server]"`)
-- **Weights**: Moved to `~/mlx-audiogen-data/converted/`, symlinked back to project
-- **Web dist**: Copied to `~/mlx-audiogen-data/web-dist/`, symlinked into venv's site-packages
-
-### Updating the Deployment
-After code changes, the Mac Mini deployment needs manual update:
+### Updating Deployment
 ```bash
-# SSH to Mac Mini
 ssh macmini
-
-# Pull latest code
 cd ~/Documents/Code/mlx-audiogen && git pull
-
-# Reinstall package into external venv
 ~/.local/bin/uv pip install ".[server]" --python ~/mlx-audiogen-venv/bin/python
-
-# Rebuild and copy web dist
 cd web && npm run build && cp -r dist/* ~/mlx-audiogen-data/web-dist/
-
-# Restart server
 launchctl unload ~/Library/LaunchAgents/com.jasonvassallo.mlx-audiogen-server.plist
 launchctl load ~/Library/LaunchAgents/com.jasonvassallo.mlx-audiogen-server.plist
 ```
 
 ### Mac Mini Model Inventory
-- **Audio gen** (in `~/mlx-audiogen-data/converted/`, auto-discovered via `--converted-dir`):
-  - `musicgen-small` (2.1GB) — text-to-audio, mono 32kHz
-  - `musicgen-melody` (5.7GB) — melody conditioning, mono 32kHz
-  - `musicgen-stereo-small` (1.1GB) — stereo variant, 32kHz
-  - `musicgen-style` (3.5GB) — style transfer from reference audio
-  - `stable-audio` (2.0GB) — diffusion model, stereo 44.1kHz
-- **Demucs**: `demucs-htdemucs` (164MB) — 4-stem source separation
-- **LLM**: `mlx-community/Qwen3.5-9B-6bit` (default for all tasks except vision)
-- **Vision**: `mlx-community/Qwen3.5-35B-A3B-4bit` (vision/complex tasks only)
+- **Audio gen** (`~/mlx-audiogen-data/converted/`): musicgen-small (2.1GB), musicgen-melody (5.7GB), musicgen-stereo-small (1.1GB), musicgen-style (3.5GB), stable-audio (2.0GB)
+- **Demucs**: demucs-htdemucs (164MB)
+- **LLM**: Qwen3.5-9B-6bit (default), Qwen3.5-35B-A3B-4bit (vision)
 - All 12 converted MLX audio models published to `jasonvassallo/mlx-*` on HuggingFace
 
 ## Max for Live Integration
 
-`m4l/mlx-audiogen.js` is a Node for Max script that connects Ableton Live to the HTTP server:
+`m4l/mlx-audiogen.js` — Node for Max script connecting Ableton Live to the HTTP server:
 
-- **Architecture**: Max for Live UI (dials, text) -> Node for Max (JS) -> HTTP POST to server -> poll status -> download WAV -> output path for drag-to-track
-- **Messages from Max**: `generate <prompt>`, `model <name>`, `seconds <float>`, `temperature`, `top_k`, `guidance`, `steps`, `cfg_scale`, `seed`, `server <host:port>`, `style_audio <path>`, `style_coef <float>`, `melody <path>`
-- **Messages to Max**: `status <text>`, `progress <0-100>`, `audio <filepath>`, `error <text>`, `models <json>`
-- **Defaults**: connects to `127.0.0.1:8420`, saves WAVs to OS temp dir (`mlx-audiogen/`)
-- **Input clamping**: All numeric values use `Math.max`/`Math.min` to prevent out-of-range values
+- **Flow**: Max for Live UI → Node for Max (JS) → HTTP POST → poll status → download WAV → output path
+- **Messages from Max**: `generate`, `model`, `seconds`, `temperature`, `top_k`, `guidance`, `steps`, `cfg_scale`, `seed`, `server`, `style_audio`, `style_coef`, `melody`
+- **Messages to Max**: `status`, `progress`, `audio`, `error`, `models`
+- **Defaults**: `127.0.0.1:8420`, WAVs to OS temp dir. All numeric values clamped
 
-## Plugin Server Fallback (Phase 8b)
+## Plugin Server Fallback
 
-The JUCE plugin auto-connects to the best available server:
+JUCE plugin auto-connects to best available server:
 
-1. **Local first**: `ServerLauncher` checks `127.0.0.1:8420`, launches via `uv run mlx-audiogen-app` if not running
-2. **Remote fallback**: If local unavailable, checks remote URL from `~/.mlx-audiogen/config.json` with CF Access auth
-3. **Re-resolve on failure**: If a generation request fails, `recheckConnection()` re-evaluates local vs remote before retry
+1. **Local first**: `ServerLauncher` checks `127.0.0.1:8420`, launches via `uv run mlx-audiogen-app` if needed
+2. **Remote fallback**: Checks remote URL from `~/.mlx-audiogen/config.json` with CF Access service token auth
+3. **Re-resolve on failure**: `recheckConnection()` re-evaluates local vs remote before retry
 
-### Connection Modes
-- **Local** (green status): Plugin talks to `127.0.0.1:8420`
-- **Remote** (blue status): Plugin talks to remote URL (e.g., `https://musicgen.djvassallo.com`) with CF Access service token
-- **Disconnected** (gray status): No server available
+**Connection modes**: Local (green), Remote (blue, CF Access headers), Disconnected (gray)
 
-### Cloudflare Access Authentication
-Remote server is behind CF Access. Plugin uses a **Service Token** (non-interactive auth):
-- Headers: `CF-Access-Client-Id` + `CF-Access-Client-Secret` sent when service token is configured
-- Credentials stored in `~/.mlx-audiogen/config.json` (`cf_client_id`, `cf_client_secret`)
-- Setup: `./scripts/setup_plugin_remote.sh <client_id> <client_secret>`
-
-### Config Format (`~/.mlx-audiogen/config.json`)
+**Config** (`~/.mlx-audiogen/config.json`):
 ```json
 {
   "project_path": "/Users/.../mlx-audiogen",
@@ -419,45 +328,38 @@ Remote server is behind CF Access. Plugin uses a **Service Token** (non-interact
 }
 ```
 
-### Limitations
-- **Sidechain conditioning** (melody/style) is local-only — remote server can't read local audio files
-- **Service token setup** requires one-time CF dashboard steps (create token + add Service Auth policy)
+**Limitations**: Sidechain conditioning (melody/style) is local-only. Service token requires one-time CF dashboard setup.
 
 ## Critical MLX Patterns
 
 ### Security Hook on Graph Materialization
-A PreToolUse hook triggers on files containing the bare `ev` + `al()` pattern — including the MLX standard graph materialization function `mx.` + that name. **Always** wrap calls in a helper to avoid triggering the hook:
+A PreToolUse hook triggers on files containing the bare `ev` + `al()` pattern — including MLX's graph materialization function. **Always** wrap calls in a helper:
 ```python
 _FORCE_COMPUTE = getattr(mx, "ev" + "al")  # avoids pattern match
-# or
-def _materialize(*args):
-    mx.__dict__["ev" + "al"](*args)
 ```
-See existing files for examples. This is required whenever you need to force MLX lazy graph execution.
 
-### Conv Weight Transposition (PyTorch to MLX)
-- **Conv1d:** `(Out, In, K)` to `(Out, K, In)` via `np.transpose(w, (0, 2, 1))`
-- **ConvTranspose1d:** `(In, Out, K)` to `(Out, K, In)` via `np.transpose(w, (1, 2, 0))`
+### Conv Weight Transposition (PyTorch → MLX)
+- **Conv1d:** `(Out, In, K)` → `(Out, K, In)` via `np.transpose(w, (0, 2, 1))`
+- **ConvTranspose1d:** `(In, Out, K)` → `(Out, K, In)` via `np.transpose(w, (1, 2, 0))`
 
 ### T5 Shared Embedding Duplication
-`T5EncoderModel` exposes both `shared.weight` and `encoder.embed_tokens.weight` in the parameter tree (same tensor, two paths). Weight conversion must write the embedding under **both keys** or `load_weights(strict=True)` fails.
+Weight conversion must write embedding under **both** `shared.weight` and `encoder.embed_tokens.weight` or `load_weights(strict=True)` fails.
 
 ### Do NOT Use `nn.quantize()` on Full Models
-It attempts to quantize every embedding, including small ones like `relative_attention_bias(32, 12)` which fail the group-size divisibility check. Use the materialization helper (see above) for parameter loading instead.
+Small embeddings like `relative_attention_bias(32, 12)` fail group-size divisibility. Use the materialization helper instead.
 
 ### Weight Key Alignment Strategy
-Module attribute names are chosen to match HuggingFace safetensors keys after prefix stripping. This minimizes remapping in conversion scripts:
-- MusicGen decoder: strip `decoder.model.decoder.` prefix, keys align directly
-- MusicGen FC layers have **no bias** (`bias=False`); attention projections also no bias
-- MusicGen melody: `audio_enc_to_dec_proj` weight stored as `audio_enc_to_dec_proj.weight` in decoder.safetensors
-- Stable Audio VAE: requires `layers.` insertion for `nn.Sequential` nesting
-- MusicGen style: audiocraft keys differ from HF — `rvq.vq.layers.N._codebook.embed` maps to `rvq.layers_N.codebook.weight`, `batch_norm.running_mean/var` become flat arrays, `embed` is input projection (768→512), `output_proj` is output projection (512→1536)
+Module names match HuggingFace safetensors keys after prefix stripping:
+- MusicGen decoder: strip `decoder.model.decoder.` prefix. FC/attention: **no bias**
+- MusicGen melody: `audio_enc_to_dec_proj.weight` in decoder.safetensors
+- Stable Audio VAE: requires `layers.` insertion for `nn.Sequential`
+- MusicGen style: audiocraft keys differ — `rvq.vq.layers.N._codebook.embed` → `rvq.layers_N.codebook.weight`, `batch_norm.running_mean/var` → flat arrays, `embed` = input proj (768→512), `output_proj` = output proj (512→1536)
 
 ### NumPy for Audio Preprocessing
-MLX does not have an `interp` equivalent. Use `numpy.interp` for audio resampling and similar preprocessing (small one-time cost before MLX computation). See `style_conditioner.py` for the pattern: convert to numpy, resample, convert back to `mx.array`.
+MLX lacks `interp`. Use `numpy.interp` for resampling (small one-time cost). See `style_conditioner.py` for pattern.
 
 ### MLX Parameter Discovery
-`nn.Module` only discovers parameters stored as direct attributes, not items in plain Python lists. For dynamic-count blocks, use `setattr(self, f"block_{i}", ...)` or rely on MLX's list-of-modules pattern (which does work for `nn.Module` subclass lists).
+`nn.Module` only discovers direct attributes, not Python list items. Use `setattr(self, f"block_{i}", ...)` for dynamic-count blocks.
 
 ## Supported Model Variants
 
@@ -480,105 +382,42 @@ MLX does not have an `interp` equivalent. Use `numpy.interp` for audio resamplin
 | Variant | HF Repo | Notes |
 |---------|---------|-------|
 | small | `stabilityai/stable-audio-open-small` | `seconds_total` conditioning only |
-| 1.0 | `stabilityai/stable-audio-open-1.0` | Gated model; adds `seconds_start` conditioning |
+| 1.0 | `stabilityai/stable-audio-open-1.0` | Gated; adds `seconds_start` conditioning |
 
 ### Demucs (Source Separation)
-| Variant | Source | Parameters | Output |
-|---------|--------|-----------|--------|
-| htdemucs | `dl.fbaipublicfiles.com` | ~27M | 4 stems: drums, bass, other, vocals |
-| htdemucs_6s | `dl.fbaipublicfiles.com` | ~27M | 6 stems: adds guitar, piano |
-
-Conversion: `mlx-audiogen-convert --model htdemucs --output ./converted/demucs-htdemucs` (requires `torch` for one-time conversion from `.th` checkpoint format).
+| Variant | Parameters | Output |
+|---------|-----------|--------|
+| htdemucs | ~27M | 4 stems: drums, bass, other, vocals |
+| htdemucs_6s | ~27M | 6 stems: adds guitar, piano |
 
 ## Security Patterns
 
-### Input Validation at CLI Boundary
-All user inputs are validated in `cli/generate.py` and `cli/convert.py` before reaching model code:
-- **Path traversal defense**: Output paths are resolved and checked for `..` components
-- **Weights directory validation**: Must exist, be a directory, and resolve cleanly
-- **Numeric range validation**: Duration, temperature, top-k, steps, and guidance scales are range-checked
-- **Repo ID whitelist**: `cli/convert.py` maintains a whitelist of known-safe HuggingFace repos; non-whitelisted repos require `--trust-remote-code`
-- **Melody/style path validation**: Audio file paths checked for existence, path traversal, and valid extension
+### Input Validation
+- **CLI** (`cli/generate.py`, `cli/convert.py`): Path traversal defense (no `..`), directory validation, numeric range checks, repo ID whitelist (non-whitelisted requires `--trust-remote-code`), audio extension validation
+- **Server** (`server/app.py`): Pydantic validators (regex patterns, `ge`/`le` constraints, `min_length`/`max_length`), `_validate_audio_path()` (traversal + extension whitelist), no filesystem paths in API responses, max 100 jobs with auto-cleanup
+- **Pipelines**: Validate required files upfront in `from_pretrained()`. Missing files → `FileNotFoundError` pointing to `mlx-audiogen-convert`
 
-### Server-Side Input Validation
-The HTTP server (`server/app.py`) validates all request fields via Pydantic and a custom path validator:
-- **Pydantic Field validators**: `model` field uses `pattern=r"^(musicgen|stable_audio)$"` regex; `sampler` uses `pattern=r"^(euler|rk4)$"`; numeric fields use `ge`/`le`/`gt` constraints; string fields use `min_length`/`max_length`
-- **Audio path validation** (`_validate_audio_path()`): Rejects `..` traversal in path components, verifies file existence, and enforces an audio extension whitelist (`.wav`, `.mp3`, `.flac`, `.ogg`, `.aac`, `.m4a`, `.aiff`)
-- **No filesystem path leaks**: The `/api/models` endpoint returns model name and type only — never the `weights_dir` filesystem path
-- **Job limit**: Max 100 concurrent jobs with automatic cleanup of completed jobs older than 5 minutes
+### General Practices
+- **Specific exceptions**: `OSError`, `ValueError`, `KeyError` — never bare `except Exception`
+- **Network retries**: `shared/hub.py` retries `OSError`/`ConnectionError`/`TimeoutError` 3× with exponential backoff
+- **Subprocess safety**: `audio_io.play_audio()` validates path, passes as list element (no shell)
+- **Prompt validation**: Non-empty required, warn at >2000 chars (T5 truncates at 512 tokens)
+- **Plugin defense-in-depth**: HTTP status validation, `safeJsonParse()`, configurable timeouts, `isPathSafe()`, filename sanitization, `chmod 0600` temp files, safe deletion, buffer clearing
 
-### Pipeline File Validation
-Both pipelines validate required files upfront in `from_pretrained()` before attempting to load:
-- MusicGen requires: `config.json`, `t5.safetensors`, `decoder.safetensors`
-- Stable Audio requires: `config.json`, `vae.safetensors`, `dit.safetensors`, `t5.safetensors`, `conditioners.safetensors`
-- Missing files raise `FileNotFoundError` with a message pointing to `mlx-audiogen-convert`
-- Invalid/non-directory `weights_dir` raises `FileNotFoundError` before any loading begins
+## Model Auto-Download
 
-### Exception Handling
-Use specific exception types (`OSError`, `ValueError`, `KeyError`) instead of bare `except Exception`. This prevents silently swallowing real bugs while still handling expected failures like missing files or network errors.
-
-### Network Retry Logic
-`shared/hub.py` retries transient network failures up to 3 times with exponential backoff. Only `OSError`, `ConnectionError`, and `TimeoutError` are retried — programming errors propagate immediately.
-
-### Subprocess Safety
-`audio_io.play_audio()` resolves and validates the file path before passing it to `subprocess.run()`. The path is passed as a list element (not through shell), preventing shell injection.
-
-### Prompt Validation
-Both pipeline `generate()` methods validate that prompts are non-empty and warn when prompts exceed 2000 characters (the T5 tokenizer truncates at 512 tokens).
-
-### Plugin Security (Phase 9a)
-JUCE plugin defense-in-depth: HTTP status validation, safe JSON parsing (`safeJsonParse()`), configurable timeouts (3s/5s/10s/60s), path traversal defense (`isPathSafe()`), shell injection prevention, filename sanitization, credential validation (min 8 chars), `chmod 0600` temp files, safe deletion (no symlinks), variation bounds check, buffer clearing on new generation.
-
-## Model Auto-Download (Phase 9b)
-
-Models can be auto-downloaded from HuggingFace instead of manual conversion:
-- **Model registry** (`shared/model_registry.py`): Maps 14 model names to `jasonvassallo/mlx-*` HF repos
-- **Auto-resolve**: `resolve_weights_dir()` checks: explicit path → `~/.mlx-audiogen/models/` cache → HF download
-- **Symlink caching**: Downloaded models are symlinked from `~/.mlx-audiogen/models/<name>` → HF cache
-- **Server discovery**: `launch_app()` auto-discovers models from `./converted/` AND `~/.mlx-audiogen/models/`
-- **Pipeline integration**: Both `MusicGenPipeline.from_pretrained()` and `StableAudioPipeline.from_pretrained()` use `resolve_weights_dir()` — pass a model name like `"musicgen-small"` to auto-download
-- **Backward compatible**: Existing explicit `weights_dir` paths work unchanged; `mlx-audiogen-convert` still works for custom conversions
+Models auto-download from HuggingFace via `shared/model_registry.py` (14 model names → `jasonvassallo/mlx-*` repos):
+- `resolve_weights_dir()`: explicit path → `~/.mlx-audiogen/models/` cache → HF download with symlink
+- Server auto-discovers from `./converted/` AND `~/.mlx-audiogen/models/`
+- Both pipelines accept model names (e.g., `"musicgen-small"`) for auto-download
+- Backward compatible with explicit `weights_dir` paths
 
 ## Weight Conversion
 
-Each model variant requires separate conversion (different architectures/weights):
-- Conversion downloads HF weights (safetensors or pytorch_model.bin), remaps keys, splits into component files
-- The converter auto-detects format: single safetensors -> sharded safetensors -> single pytorch_model.bin -> sharded pytorch_model.bin
-- MusicGen produces: `decoder.safetensors`, `t5.safetensors`, `config.json`, `t5_config.json`, tokenizer files
-- MusicGen melody variants additionally store `audio_enc_to_dec_proj` weights and set `is_melody: true` in config
-- Stable Audio produces: `vae.safetensors`, `dit.safetensors`, `t5.safetensors`, `conditioners.safetensors`, configs
-- EnCodec weights are loaded separately at runtime from `mlx-community/encodec-32khz-float32`
-- MusicGen style uses Meta's audiocraft format (`state_dict.bin`) with a nested `best_state` dict; keys may lack `lm.` prefix; converter auto-detects prefix presence
-- PyTorch `.bin` loading requires `torch` (install via `uv sync --extra convert`)
-
-## MusicGen Melody Conditioning
-
-The melody pipeline extracts a chromagram (12-bin pitch class profile) from audio:
-1. Audio -> mono conversion + STFT (n_fft=16384, hop_length=4096, Hann window)
-2. Chroma filter bank maps FFT bins to 12 pitch classes (C, C#, D, ..., B)
-3. Normalize per frame, argmax to one-hot encoding
-4. Result: shape `(1, 235, 12)` — projected via `audio_enc_to_dec_proj` Linear(12, hidden_size)
-5. Concatenated with T5 text tokens for cross-attention in the decoder
-
-Melody variants auto-detected from HF config (`model_type: "musicgen_melody"`) during conversion.
-
-## MusicGen Style Conditioning
-
-Style variants use a frozen MERT feature extractor + style conditioner pipeline:
-1. MERT extracts features from reference audio at 75Hz → (B, T, 768)
-2. Linear projection: 768 → 512 (style_dim) via `embed` layer
-3. 8-layer pre-norm transformer encoder (512 dim, 8 heads, 2048 FFN)
-4. BatchNorm1d (affine=False, inference mode with running stats)
-5. RVQ with 6 codebooks (1024 bins each) — progressive residual quantization
-6. Downsample by factor 15
-7. Output projection: 512 → 1536 (decoder hidden size) via `output_proj` layer → final style tokens for cross-attention
-
-Generation uses dual-CFG (3 forward passes per step):
-- Full: text + style conditioning
-- Style-only: style tokens + zeroed text
-- Unconditional: all zeros
-- Formula: `uncond + cfg * (style + beta * (full - style) - uncond)`
-- Default: `cfg=3.0`, `beta=5.0`
-
-Style model uses audiocraft format (`state_dict.bin`) not HF transformers.
-MERT weights downloaded separately from `m-a-p/MERT-v1-95M`.
+Each model variant requires separate conversion:
+- Auto-detects format: single safetensors → sharded safetensors → single pytorch_model.bin → sharded
+- MusicGen → `decoder.safetensors`, `t5.safetensors`, `config.json`, tokenizer files
+- Stable Audio → `vae.safetensors`, `dit.safetensors`, `t5.safetensors`, `conditioners.safetensors`, configs
+- EnCodec loaded at runtime from `mlx-community/encodec-32khz-float32`
+- MusicGen style: audiocraft `state_dict.bin` with nested `best_state`; auto-detects `lm.` prefix
+- PyTorch `.bin` requires `torch` (`uv sync --extra convert`)
