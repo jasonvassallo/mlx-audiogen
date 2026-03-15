@@ -5,6 +5,8 @@ import type {
   EnhanceResponse,
   EnrichmentJobStatus,
   EnrichmentStats,
+  FlywheelConfig,
+  FlywheelStatus,
   GenerateRequest,
   GenerateResponse,
   JobInfo,
@@ -20,12 +22,15 @@ import type {
   PromptAnalysis,
   PromptMemoryData,
   ServerSettings,
+  StarResponse,
   StemResult,
   TagDatabase,
   TasteProfile,
   TrackSearchResult,
   TrainRequest,
   TrainStatus,
+  VersionChangelog,
+  VersionSummary,
 } from "../types/api";
 
 /**
@@ -572,4 +577,96 @@ export function setTasteOverrides(text: string): Promise<TasteProfile> {
     method: "PUT",
     body: JSON.stringify({ text }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9g-4: Flywheel Intelligence
+// ---------------------------------------------------------------------------
+
+/** Star a generation for re-training. */
+export async function starGeneration(
+  jobId: string,
+): Promise<StarResponse> {
+  const res = await fetch(`${_base}/star/${jobId}`, { method: "POST" });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** Unstar a generation. */
+export async function unstarGeneration(
+  jobId: string,
+): Promise<StarResponse> {
+  const res = await fetch(`${_base}/star/${jobId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** Get flywheel configuration. */
+export function getFlywheelConfig(): Promise<FlywheelConfig> {
+  return request<FlywheelConfig>("/flywheel/config");
+}
+
+/** Update flywheel configuration. */
+export function updateFlywheelConfig(
+  config: Partial<FlywheelConfig>,
+): Promise<FlywheelConfig> {
+  return request<FlywheelConfig>("/flywheel/config", {
+    method: "PUT",
+    body: JSON.stringify(config),
+  });
+}
+
+/** Get flywheel status. */
+export function getFlywheelStatus(): Promise<FlywheelStatus> {
+  return request<FlywheelStatus>("/flywheel/status");
+}
+
+/** List versions for a LoRA adapter. */
+export function getLoraVersions(
+  name: string,
+): Promise<VersionSummary[]> {
+  return request<VersionSummary[]>(
+    `/loras/${encodeURIComponent(name)}/versions`,
+  );
+}
+
+/** Get changelog for a specific LoRA version. */
+export function getLoraChangelog(
+  name: string,
+  version: number,
+): Promise<VersionChangelog> {
+  return request<VersionChangelog>(
+    `/loras/${encodeURIComponent(name)}/versions/${version}`,
+  );
+}
+
+/** Set the active version for a LoRA adapter. */
+export function setActiveLoraVersion(
+  name: string,
+  version: number,
+): Promise<{ name: string; active_version: number }> {
+  return request<{ name: string; active_version: number }>(
+    `/loras/${encodeURIComponent(name)}/active/${version}`,
+    { method: "PUT" },
+  );
+}
+
+/** Trigger a flywheel re-train for a LoRA adapter. */
+export function triggerRetrain(
+  name: string,
+): Promise<{ status: string; adapter: string }> {
+  return request<{ status: string; adapter: string }>(
+    `/flywheel/retrain/${encodeURIComponent(name)}`,
+    { method: "POST" },
+  );
+}
+
+/** Reset kept generations for a LoRA adapter. */
+export function resetKeptGenerations(
+  name: string,
+): Promise<{ status: string; adapter: string }> {
+  return request<{ status: string; adapter: string }>(
+    `/flywheel/reset/${encodeURIComponent(name)}`,
+    { method: "POST" },
+  );
 }

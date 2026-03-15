@@ -63,6 +63,7 @@ export interface JobInfo {
   sample_rate: number | null;
   progress: number; // 0.0 to 1.0
   has_midi?: boolean;
+  starred?: boolean;
 }
 
 /** Preset info from /api/presets listing. */
@@ -161,6 +162,9 @@ export interface LoRAInfo {
   best_loss: number | null;
   training_samples: number | null;
   created_at: string | null;
+  active_version?: number;
+  total_versions?: number;
+  stars_since_train?: number;
 }
 
 /** LoRA training request for POST /api/train. */
@@ -190,6 +194,91 @@ export interface TrainStatus {
   loss: number;
   best_loss: number | null;
   progress: number;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9g-4: Flywheel Intelligence
+// ---------------------------------------------------------------------------
+
+/** Flywheel configuration. */
+export interface FlywheelConfig {
+  retrain_threshold: number;
+  blend_ratio: number;
+  taste_refresh_interval: number;
+  auto_retrain: boolean;
+  base_collection: string | null;
+}
+
+/** Response from star/unstar generation. */
+export interface StarResponse {
+  starred: boolean;
+  stars_since_train: number;
+}
+
+/** Flywheel status overview. */
+export interface FlywheelStatus {
+  stars_since_train: number;
+  retrain_threshold: number;
+  auto_retrain: boolean;
+  active_version: number | null;
+  total_versions: number;
+}
+
+/** A single tag influence entry. */
+export interface TagInfluence {
+  tag: string;
+  pct: number;
+}
+
+/** Top influences by category. */
+export interface TopInfluences {
+  genre: TagInfluence[];
+  mood: TagInfluence[];
+  instrument: TagInfluence[];
+}
+
+/** Dataset composition for a version. */
+export interface DatasetComposition {
+  library_tracks: number;
+  kept_generations: number;
+  blend_ratio: { library: number; generations: number };
+  total_training_samples: number;
+}
+
+/** Changes since parent version. */
+export interface NewSinceParent {
+  kept_generations_added: number;
+  enrichment_tags_added: number;
+  library_tracks_added: number;
+}
+
+/** Training stats for a version. */
+export interface TrainingStats {
+  profile: string;
+  epochs: number;
+  best_loss: number;
+  duration_seconds: number;
+}
+
+/** Summary of a LoRA version. */
+export interface VersionSummary {
+  version: number;
+  created_at: string;
+  is_active: boolean;
+  library_tracks: number;
+  kept_generations: number;
+  best_loss: number;
+}
+
+/** Full changelog for a LoRA version. */
+export interface VersionChangelog {
+  version: number;
+  created_at: string;
+  parent_version: number | null;
+  dataset: DatasetComposition;
+  top_influences: TopInfluences;
+  new_since_parent: NewSinceParent;
+  training: TrainingStats;
 }
 
 // ---------------------------------------------------------------------------

@@ -8,8 +8,18 @@ import {
   getTasteProfile,
   refreshTasteProfile,
   setTasteOverrides,
+  getFlywheelConfig,
+  updateFlywheelConfig,
+  getFlywheelStatus,
+  triggerRetrain,
+  resetKeptGenerations,
 } from "../api/client";
-import type { CredentialStatus, TasteProfile } from "../types/api";
+import type {
+  CredentialStatus,
+  FlywheelConfig,
+  FlywheelStatus,
+  TasteProfile,
+} from "../types/api";
 
 const RETENTION_OPTIONS = [
   { label: "Keep forever", value: 0 },
@@ -77,6 +87,9 @@ export default function SettingsPanel() {
 
       {/* Taste Profile section */}
       <TasteProfileSection />
+
+      {/* Flywheel Intelligence section */}
+      <FlywheelSection />
     </div>
   );
 }
@@ -515,6 +528,261 @@ function TasteProfileSection() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function FlywheelSection() {
+  const [config, setConfig] = useState<FlywheelConfig | null>(null);
+  const [status, setStatus] = useState<FlywheelStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const loras = useStore((s) => s.loras);
+
+  const loadData = useCallback(async () => {
+    try {
+      const [c, s] = await Promise.all([
+        getFlywheelConfig(),
+        getFlywheelStatus(),
+      ]);
+      setConfig(c);
+      setStatus(s);
+    } catch {
+      // Server may not support flywheel endpoints yet
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleToggleAutoRetrain = useCallback(async () => {
+    if (!config) return;
+    try {
+      const updated = await updateFlywheelConfig({
+        auto_retrain: !config.auto_retrain,
+      });
+      setConfig(updated);
+    } catch {
+      // Ignore
+    }
+  }, [config]);
+
+  const handleThresholdChange = useCallback(
+    async (value: number) => {
+      if (!config) return;
+      try {
+        const updated = await updateFlywheelConfig({
+          retrain_threshold: value,
+        });
+        setConfig(updated);
+      } catch {
+        // Ignore
+      }
+    },
+    [config],
+  );
+
+  const handleTasteIntervalChange = useCallback(
+    async (value: number) => {
+      if (!config) return;
+      try {
+        const updated = await updateFlywheelConfig({
+          taste_refresh_interval: value,
+        });
+        setConfig(updated);
+      } catch {
+        // Ignore
+      }
+    },
+    [config],
+  );
+
+  const handleBlendChange = useCallback(
+    async (value: number) => {
+      if (!config) return;
+      try {
+        const updated = await updateFlywheelConfig({
+          blend_ratio: value / 100,
+        });
+        setConfig(updated);
+      } catch {
+        // Ignore
+      }
+    },
+    [config],
+  );
+
+  const handleRetrain = useCallback(async () => {
+    const first = loras[0];
+    if (!first) return;
+    setLoading(true);
+    setActionMsg(null);
+    try {
+      const result = await triggerRetrain(first.name);
+      setActionMsg(`Re-train started: ${result.adapter}`);
+      loadData();
+    } catch (err) {
+      setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    setLoading(false);
+  }, [loras, loadData]);
+
+  const handleReset = useCallback(async () => {
+    const first = loras[0];
+    if (!first) return;
+    setLoading(true);
+    setActionMsg(null);
+    try {
+      const result = await resetKeptGenerations(first.name);
+      setActionMsg(`Cache reset: ${result.adapter}`);
+      loadData();
+    } catch (err) {
+      setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    setLoading(false);
+  }, [loras, loadData]);
+
+  const blendPct = config ? Math.round(config.blend_ratio * 100) : 80;
+
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <h3 className="text-xs font-medium uppercase tracking-wider text-text-secondary">
+        Flywheel Intelligence
+      </h3>
+      <p className="text-[10px] text-text-muted">
+        Auto-retrain LoRA adapters from starred generations
+      </p>
+
+      <div className="space-y-3 rounded border border-border bg-surface-2 p-3">
+        {/* Auto-retrain toggle */}
+        <label className="flex items-center gap-2 text-xs text-text-primary cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config?.auto_retrain ?? false}
+            onChange={handleToggleAutoRetrain}
+            className="accent-sky-500"
+          />
+          Auto-retrain when threshold reached
+        </label>
+
+        {/* Retrain threshold */}
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-zinc-500">
+            Retrain Threshold (starred generations)
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={config?.retrain_threshold ?? 10}
+            onChange={(e) => {
+              const v = parseInt(e.target.value);
+              if (!isNaN(v) && v >= 1 && v <= 100) handleThresholdChange(v);
+            }}
+            className="w-full rounded border border-border bg-zinc-900 px-2 py-1 text-xs text-text-primary tabular-nums focus:border-accent focus:outline-none"
+          />
+        </div>
+
+        {/* Taste refresh interval */}
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-zinc-500">
+            Taste Refresh Interval (generations)
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={config?.taste_refresh_interval ?? 5}
+            onChange={(e) => {
+              const v = parseInt(e.target.value);
+              if (!isNaN(v) && v >= 1 && v <= 50) handleTasteIntervalChange(v);
+            }}
+            className="w-full rounded border border-border bg-zinc-900 px-2 py-1 text-xs text-text-primary tabular-nums focus:border-accent focus:outline-none"
+          />
+        </div>
+
+        {/* Dataset blend slider */}
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-zinc-500">
+            Dataset Blend
+          </label>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={blendPct}
+            onChange={(e) => handleBlendChange(parseInt(e.target.value))}
+            className="w-full accent-sky-500"
+          />
+          <p className="text-[10px] text-text-muted tabular-nums">
+            {blendPct}% Library / {100 - blendPct}% Generations
+          </p>
+        </div>
+
+        {/* Status line */}
+        {status && (
+          <div className="rounded bg-zinc-900 p-2 text-[10px] text-text-muted space-y-0.5">
+            <p>
+              Stars since train:{" "}
+              <span className="text-yellow-400 font-medium">
+                {status.stars_since_train}
+              </span>
+              {" / "}
+              <span className="text-text-secondary">
+                {status.retrain_threshold}
+              </span>
+            </p>
+            {status.active_version != null && (
+              <p>
+                Active version:{" "}
+                <span className="text-text-primary font-medium">
+                  v{status.active_version}
+                </span>
+                {" of "}
+                {status.total_versions}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex gap-2">
+          <button
+            onClick={handleRetrain}
+            disabled={loading || loras.length === 0}
+            className="rounded bg-sky-600 px-3 py-1.5 text-[10px] font-medium text-white hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? "Working..." : "Re-train Now"}
+          </button>
+          <button
+            onClick={handleReset}
+            disabled={loading || loras.length === 0}
+            className="rounded border border-zinc-600 px-3 py-1.5 text-[10px] text-zinc-300 hover:border-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Reset Cache
+          </button>
+        </div>
+
+        {/* Action feedback */}
+        {actionMsg && (
+          <p
+            className={`text-[10px] ${
+              actionMsg.startsWith("Error")
+                ? "text-red-400"
+                : "text-emerald-400"
+            }`}
+          >
+            {actionMsg}
+          </p>
+        )}
+
+        {loras.length === 0 && (
+          <p className="text-[10px] text-text-muted">
+            Train a LoRA adapter first to enable flywheel features.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

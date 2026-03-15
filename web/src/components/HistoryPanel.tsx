@@ -1,5 +1,11 @@
+import { useState } from "react";
 import { useStore } from "../store/useStore";
-import { getAudioUrl, getMidiUrl } from "../api/client";
+import {
+  getAudioUrl,
+  getMidiUrl,
+  starGeneration,
+  unstarGeneration,
+} from "../api/client";
 import AudioPlayer from "./AudioPlayer";
 
 const STEM_COLORS: Record<string, { bg: string; text: string }> = {
@@ -22,6 +28,7 @@ export default function HistoryPanel() {
   const stemsLoading = useStore((s) => s.stemsLoading);
   const stemAudioUrls = useStore((s) => s.stemAudioUrls);
   const requestStemSeparation = useStore((s) => s.requestStemSeparation);
+  const [starredMap, setStarredMap] = useState<Record<string, boolean>>({});
 
   if (!historyLoaded) {
     return (
@@ -107,6 +114,41 @@ export default function HistoryPanel() {
 
               {/* Action buttons */}
               <div className="flex items-center gap-1 shrink-0">
+                {/* Star for flywheel re-training */}
+                {entry.job.status === "done" && (
+                  <button
+                    onClick={async () => {
+                      const isStarred =
+                        starredMap[entry.id] ?? entry.job.starred ?? false;
+                      try {
+                        if (isStarred) {
+                          await unstarGeneration(entry.id);
+                          setStarredMap((m) => ({ ...m, [entry.id]: false }));
+                        } else {
+                          await starGeneration(entry.id);
+                          setStarredMap((m) => ({ ...m, [entry.id]: true }));
+                        }
+                      } catch (err) {
+                        console.error("Star toggle failed:", err);
+                      }
+                    }}
+                    className={`p-1 rounded transition-colors ${
+                      (starredMap[entry.id] ?? entry.job.starred)
+                        ? "text-yellow-400 hover:text-yellow-300"
+                        : "text-text-muted hover:text-yellow-400"
+                    }`}
+                    title={
+                      (starredMap[entry.id] ?? entry.job.starred)
+                        ? "Remove star"
+                        : "Star for re-training"
+                    }
+                  >
+                    {(starredMap[entry.id] ?? entry.job.starred)
+                      ? "\u2605"
+                      : "\u2606"}
+                  </button>
+                )}
+
                 {/* Favorite toggle */}
                 <button
                   onClick={() => toggleFavorite(entry.id)}
